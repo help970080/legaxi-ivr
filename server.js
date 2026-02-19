@@ -67,17 +67,67 @@ async function generateAudio(text, filename) {
 function buildMensaje(c) {
   const sF = Number(c.saldo).toLocaleString('es-MX', { minimumFractionDigits: 0 });
   const tF = Number(c.tarifa).toLocaleString('es-MX', { minimumFractionDigits: 0 });
-  const nom = (c.nombre || '').replace(/[°•*"\\#]/g, '').split(' ')[0];
-  return `Buenas tardes. Le llamamos de LeGaXi Asociados. LMV Credia asignó su pagaré para cobro, por un adeudo de ${sF} pesos, con ${c.diasAtraso} días de atraso. ${nom}, su pago mínimo es de ${tF} pesos. Para hacer una promesa de pago, marque 1. Para hablar con su gestor, marque 2. Si ya realizó su pago, marque 3.`;
+  const nom = (c.nombre || '').replace(/[°•*"\\#]/g, '');
+  // Extraer nombre y apellido para sonar más formal
+  const partes = nom.trim().split(/\s+/);
+  const nombreCorto = partes[0]; // Solo primer nombre para respuestas
+  const dias = Number(c.diasAtraso) || 0;
+  
+  const saludo = getHoraSaludo();
+  const opciones = `Para hacer una promesa de pago, marque 1. Para hablar con su gestor, marque 2. Si ya realizó su pago, marque 3.`;
+  
+  // NIVEL 1: Recordatorio amable (1-15 días)
+  if (dias <= 15) {
+    return `${saludo}. ¿Hablo con ${nom}? Le llamamos de LeGaXi Asociados. LMV Credia nos ha solicitado contactarle respecto a su pagaré, el cual presenta un saldo de ${sF} pesos con ${dias} días de atraso. ${nombreCorto}, su pago mínimo es de ${tF} pesos. Le invitamos a regularizar su situación para evitar cargos adicionales. ${opciones}`;
+  }
+  
+  // NIVEL 2: Seguimiento firme (16-30 días)
+  if (dias <= 30) {
+    return `${saludo}. ¿Hablo con ${nom}? Le llamamos de LeGaXi Asociados en carácter de urgente. LMV Credia asignó su pagaré para cobro por un adeudo de ${sF} pesos. ${nombreCorto}, su cuenta tiene ${dias} días de atraso y esto está generando intereses y afectación a su historial crediticio. Su pago mínimo es de ${tF} pesos. Es importante que regularice su situación a la brevedad. ${opciones}`;
+  }
+  
+  // NIVEL 3: Presión fuerte (31-60 días)
+  if (dias <= 60) {
+    return `${saludo}. Esta llamada es para ${nom}. Le comunicamos de LeGaXi Asociados, despacho de cobranza autorizado por LMV Credia. Su pagaré presenta un adeudo vencido de ${sF} pesos con ${dias} días de atraso. ${nombreCorto}, le informamos que de no regularizar su cuenta, se procederá con las acciones de cobro correspondientes conforme a la ley. Su pago mínimo para evitar esto es de ${tF} pesos. ${opciones}`;
+  }
+  
+  // NIVEL 4: Máxima presión (61+ días)
+  return `${saludo}. Esta llamada va dirigida a ${nom}. Le comunicamos de LeGaXi Asociados, despacho de cobranza legal autorizado por LMV Credia. Su pagaré con un adeudo de ${sF} pesos se encuentra vencido con ${dias} días de atraso. ${nombreCorto}, esta es una notificación formal. Su expediente está en proceso de ser turnado al área legal para iniciar las gestiones de cobro que correspondan. Aún está a tiempo de evitar costos adicionales. Su pago mínimo es de ${tF} pesos. ${opciones}`;
 }
 
-function buildRespuesta(digit, nombre) {
-  const n = (nombre || 'Cliente').split(' ')[0];
+function getHoraSaludo() {
+  // Hora de México (UTC-6)
+  const now = new Date();
+  const mx = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+  const hora = mx.getHours();
+  if (hora < 12) return 'Buenos días';
+  if (hora < 19) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+function buildRespuesta(digit, nombre, dias) {
+  const n = (nombre || 'Cliente').replace(/[°•*"\\#]/g, '').split(/\s+/)[0];
+  const d = Number(dias) || 0;
+  
   switch (digit) {
-    case '1': return `Gracias ${n}. Hemos registrado su promesa de pago. Un gestor le contactará pronto para confirmar los detalles. Hasta luego.`;
-    case '2': return `Entendido ${n}. Lo estamos comunicando con su gestor. Por favor espere.`;
-    case '3': return `Gracias ${n}. Registramos que usted ya realizó su pago. Verificaremos en nuestro sistema. Buen día.`;
-    default: return `Opción no válida. Le contactaremos pronto. Hasta luego.`;
+    case '1': {
+      if (d <= 15) {
+        return `Gracias ${n}. Hemos registrado su promesa de pago. Un gestor le contactará para confirmar los detalles y apoyarle con su proceso. Que tenga buen día.`;
+      } else if (d <= 30) {
+        return `${n}, hemos registrado su promesa de pago. Es muy importante que cumpla con el compromiso para evitar que su caso escale. Un gestor le contactará pronto para confirmar. Hasta luego.`;
+      } else {
+        return `${n}, queda registrada su promesa de pago. Le recordamos que el incumplimiento de esta promesa podría acelerar las acciones de cobro. Un gestor le contactará para formalizar el acuerdo. Hasta luego.`;
+      }
+    }
+    case '2': return `Entendido ${n}. Lo estamos comunicando con su gestor asignado. Por favor no cuelgue.`;
+    case '3': {
+      if (d <= 30) {
+        return `Gracias ${n}. Registramos que ya realizó su pago. Lo verificaremos en nuestro sistema y se actualizará su cuenta. Buen día.`;
+      } else {
+        return `${n}, tomamos nota de que indica haber realizado su pago. Nuestro equipo lo verificará. Si el pago no se confirma en las próximas 48 horas, se continuará con el proceso de cobro. Hasta luego.`;
+      }
+    }
+    default: return `${n}, no recibimos una opción válida. Un gestor se pondrá en contacto con usted. Hasta luego.`;
   }
 }
 
@@ -218,6 +268,7 @@ app.post('/telnyx/webhook', async (req, res) => {
         // El cliente presionó una tecla
         const digits = event.payload?.digits;
         const nombre = clientData?.nombre || 'Cliente';
+        const diasAtraso = clientData?.diasAtraso || 0;
 
         if (digits) {
           const resultMap = { '1': 'promesa_pago', '2': 'transferencia', '3': 'ya_pago' };
@@ -227,7 +278,7 @@ app.post('/telnyx/webhook', async (req, res) => {
           if (digits === '2') {
             // TRANSFERENCIA EN VIVO al gestor
             const gestorPhone = getGestorPhone(clientData?.promotor);
-            const respMsg = buildRespuesta('2', nombre);
+            const respMsg = buildRespuesta('2', nombre, diasAtraso);
             
             try {
               const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
@@ -247,7 +298,7 @@ app.post('/telnyx/webhook', async (req, res) => {
             }
           } else {
             // Teclas 1, 3 u otra - reproducir respuesta y colgar después
-            const respMsg = buildRespuesta(digits, nombre);
+            const respMsg = buildRespuesta(digits, nombre, diasAtraso);
             const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
             const respFile = `resp_${respHash}.mp3`;
             const hangupState = Buffer.from(JSON.stringify({ campaignId, index, action: 'hangup' })).toString('base64');
@@ -409,13 +460,38 @@ async function sendToGAS(entry) {
 }
 
 // ============================================================
-// HACER LLAMADA (con formato de teléfono)
+// HACER LLAMADA (con formato de teléfono + horario)
 // ============================================================
+function isHorarioPermitido() {
+  const now = new Date();
+  const mx = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+  const hora = mx.getHours();
+  const dia = mx.getDay(); // 0=domingo
+  // No llamar domingos, ni antes de 8am, ni después de 8pm
+  if (dia === 0) return false;
+  if (hora < 8 || hora >= 20) return false;
+  return true;
+}
+
+function getNivelCobranza(dias) {
+  if (dias <= 15) return 'NIVEL 1 - Recordatorio';
+  if (dias <= 30) return 'NIVEL 2 - Urgente';
+  if (dias <= 60) return 'NIVEL 3 - Presión';
+  return 'NIVEL 4 - Legal';
+}
+
 async function makeCall(clientData, campaignId, index) {
+  if (!isHorarioPermitido()) {
+    throw new Error('Fuera de horario permitido (Lun-Sáb 8am-8pm)');
+  }
+  
   let phone = String(clientData.telefono).replace(/[^0-9]/g, '');
   if (phone.length === 10) phone = '52' + phone;
   if (!phone.startsWith('+')) phone = '+' + phone;
   if (phone.length < 12) throw new Error(`Tel inválido: ${clientData.telefono}`);
+  
+  const nivel = getNivelCobranza(Number(clientData.diasAtraso) || 0);
+  console.log(`📞 ${clientData.nombre} | ${nivel} | ${clientData.diasAtraso} días | $${clientData.saldo}`);
 
   return telnyxCall(phone, campaignId, index);
 }
