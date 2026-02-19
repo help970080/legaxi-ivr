@@ -245,43 +245,45 @@ app.post('/telnyx/webhook', async (req, res) => {
               });
             }
           } else {
-            // Teclas 1, 3 u otra - reproducir respuesta y colgar
+            // Teclas 1, 3 u otra - reproducir respuesta y colgar después
             const respMsg = buildRespuesta(digits, nombre);
             const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
             const respFile = `resp_${respHash}.mp3`;
+            const hangupState = Buffer.from(JSON.stringify({ campaignId, index, action: 'hangup' })).toString('base64');
 
             try {
               const respUrl = await generateAudio(respMsg, respFile);
               await telnyxCommand(callControlId, 'playback_start', {
                 audio_url: respUrl,
-                client_state: clientStateB64
+                client_state: hangupState
               });
             } catch (e) {
               await telnyxCommand(callControlId, 'speak', {
                 payload: respMsg,
                 voice: 'female',
                 language: 'es-MX',
-                client_state: clientStateB64
+                client_state: hangupState
               });
             }
           }
         } else {
           // No presionó nada (timeout)
           logResult(campaignId, index, 'sin_respuesta', 'No presionó ninguna tecla');
+          const hangupState = Buffer.from(JSON.stringify({ campaignId, index, action: 'hangup' })).toString('base64');
           try {
             const noRespMsg = 'No recibimos su respuesta. Le volveremos a contactar. Hasta luego.';
             const noRespHash = crypto.createHash('md5').update(noRespMsg).digest('hex');
             const noRespUrl = await generateAudio(noRespMsg, `noresp_${noRespHash}.mp3`);
             await telnyxCommand(callControlId, 'playback_start', {
               audio_url: noRespUrl,
-              client_state: clientStateB64
+              client_state: hangupState
             });
           } catch (e) {
             await telnyxCommand(callControlId, 'speak', {
               payload: 'No recibimos su respuesta. Hasta luego.',
               voice: 'female',
               language: 'es-MX',
-              client_state: clientStateB64
+              client_state: hangupState
             });
           }
         }
@@ -290,8 +292,9 @@ app.post('/telnyx/webhook', async (req, res) => {
 
       case 'call.playback.ended':
       case 'call.speak.ended': {
-        // Verificar si hay que transferir (tecla 2)
+        // Solo actuar si hay una acción pendiente en el state
         if (state.action === 'transfer' && state.gestorPhone) {
+          // Transferir al gestor EN VIVO
           console.log(`📲 Transfiriendo a gestor: ${state.gestorPhone}`);
           await telnyxCommand(callControlId, 'transfer', {
             to: state.gestorPhone,
@@ -299,10 +302,11 @@ app.post('/telnyx/webhook', async (req, res) => {
             timeout_secs: 30,
             client_state: clientStateB64
           });
-        } else {
-          // Audio terminó, colgar
+        } else if (state.action === 'hangup') {
+          // Respuesta terminó, ahora sí colgar
           await telnyxCommand(callControlId, 'hangup', { client_state: clientStateB64 });
         }
+        // Si no hay action, es el playback del gather — NO hacer nada, esperar DTMF
         break;
       }
 
