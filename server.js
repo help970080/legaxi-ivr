@@ -19,7 +19,7 @@ const {
   GAS_WEBHOOK_URL,
   SERVER_URL,              // https://legaxi-ivr.onrender.com
   API_KEY,
-  DEFAULT_COBRADOR_PHONE,
+  DEFAULT_GESTOR_PHONE,
   PORT = 3000
 } = process.env;
 
@@ -68,14 +68,14 @@ function buildMensaje(c) {
   const sF = Number(c.saldo).toLocaleString('es-MX', { minimumFractionDigits: 0 });
   const tF = Number(c.tarifa).toLocaleString('es-MX', { minimumFractionDigits: 0 });
   const nom = (c.nombre || '').replace(/[°•*"\\#]/g, '').split(' ')[0];
-  return `Buenas tardes. Le llamamos de LeGaXi Asociados. ${nom}, su cuenta presenta un saldo vencido de ${sF} pesos, con ${c.diasAtraso} días de atraso. Su pago mínimo es de ${tF} pesos. Para hacer una promesa de pago, marque 1. Para hablar con su cobrador, marque 2. Si ya realizó su pago, marque 3.`;
+  return `Buenas tardes. Le llamamos de LeGaXi Asociados. LMV Credia asignó su pagaré para cobro, por un adeudo de ${sF} pesos, con ${c.diasAtraso} días de atraso. ${nom}, su pago mínimo es de ${tF} pesos. Para hacer una promesa de pago, marque 1. Para hablar con su gestor, marque 2. Si ya realizó su pago, marque 3.`;
 }
 
 function buildRespuesta(digit, nombre) {
   const n = (nombre || 'Cliente').split(' ')[0];
   switch (digit) {
-    case '1': return `Gracias ${n}. Hemos registrado su promesa de pago. Un asesor le contactará pronto para confirmar los detalles. Hasta luego.`;
-    case '2': return `Entendido ${n}. Un asesor de cobranza se comunicará con usted en breve. Hasta luego.`;
+    case '1': return `Gracias ${n}. Hemos registrado su promesa de pago. Un gestor le contactará pronto para confirmar los detalles. Hasta luego.`;
+    case '2': return `Entendido ${n}. Lo estamos comunicando con su gestor. Por favor espere.`;
     case '3': return `Gracias ${n}. Registramos que usted ya realizó su pago. Verificaremos en nuestro sistema. Buen día.`;
     default: return `Opción no válida. Le contactaremos pronto. Hasta luego.`;
   }
@@ -220,27 +220,50 @@ app.post('/telnyx/webhook', async (req, res) => {
 
         if (digits) {
           const resultMap = { '1': 'promesa_pago', '2': 'transferencia', '3': 'ya_pago' };
-          const detalleMap = { '1': 'Promesa de pago', '2': 'Pidió hablar con cobrador', '3': 'Ya pagó' };
+          const detalleMap = { '1': 'Promesa de pago', '2': 'Pidió hablar con gestor', '3': 'Ya pagó' };
           logResult(campaignId, index, resultMap[digits] || 'opcion_invalida', detalleMap[digits] || `Tecla: ${digits}`);
 
-          // Reproducir respuesta
-          const respMsg = buildRespuesta(digits, nombre);
-          const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
-          const respFile = `resp_${respHash}.mp3`;
+          if (digits === '2') {
+            // TRANSFERENCIA EN VIVO al gestor
+            const gestorPhone = getGestorPhone(clientData?.promotor);
+            const respMsg = buildRespuesta('2', nombre);
+            
+            try {
+              const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
+              const respUrl = await generateAudio(respMsg, `resp_${respHash}.mp3`);
+              // Reproducir mensaje antes de transferir
+              await telnyxCommand(callControlId, 'playback_start', {
+                audio_url: respUrl,
+                client_state: Buffer.from(JSON.stringify({ campaignId, index, action: 'transfer', gestorPhone })).toString('base64')
+              });
+            } catch (e) {
+              await telnyxCommand(callControlId, 'speak', {
+                payload: respMsg,
+                voice: 'female',
+                language: 'es-MX',
+                client_state: Buffer.from(JSON.stringify({ campaignId, index, action: 'transfer', gestorPhone })).toString('base64')
+              });
+            }
+          } else {
+            // Teclas 1, 3 u otra - reproducir respuesta y colgar
+            const respMsg = buildRespuesta(digits, nombre);
+            const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
+            const respFile = `resp_${respHash}.mp3`;
 
-          try {
-            const respUrl = await generateAudio(respMsg, respFile);
-            await telnyxCommand(callControlId, 'playback_start', {
-              audio_url: respUrl,
-              client_state: clientStateB64
-            });
-          } catch (e) {
-            await telnyxCommand(callControlId, 'speak', {
-              payload: respMsg,
-              voice: 'female',
-              language: 'es-MX',
-              client_state: clientStateB64
-            });
+            try {
+              const respUrl = await generateAudio(respMsg, respFile);
+              await telnyxCommand(callControlId, 'playback_start', {
+                audio_url: respUrl,
+                client_state: clientStateB64
+              });
+            } catch (e) {
+              await telnyxCommand(callControlId, 'speak', {
+                payload: respMsg,
+                voice: 'female',
+                language: 'es-MX',
+                client_state: clientStateB64
+              });
+            }
           }
         } else {
           // No presionó nada (timeout)
@@ -266,10 +289,22 @@ app.post('/telnyx/webhook', async (req, res) => {
       }
 
       case 'call.playback.ended':
-      case 'call.speak.ended':
-        // Audio terminó, colgar
-        await telnyxCommand(callControlId, 'hangup', { client_state: clientStateB64 });
+      case 'call.speak.ended': {
+        // Verificar si hay que transferir (tecla 2)
+        if (state.action === 'transfer' && state.gestorPhone) {
+          console.log(`📲 Transfiriendo a gestor: ${state.gestorPhone}`);
+          await telnyxCommand(callControlId, 'transfer', {
+            to: state.gestorPhone,
+            from: TELNYX_FROM_NUMBER,
+            timeout_secs: 30,
+            client_state: clientStateB64
+          });
+        } else {
+          // Audio terminó, colgar
+          await telnyxCommand(callControlId, 'hangup', { client_state: clientStateB64 });
+        }
         break;
+      }
 
       case 'call.hangup':
       case 'call.machine.detection.ended':
@@ -302,18 +337,35 @@ app.post('/telnyx/webhook', async (req, res) => {
 });
 
 // ============================================================
-// COBRADORES
+// GESTORES
 // ============================================================
-function getCobradorPhone(promotor) {
-  const map = {
-    'Brenda Rosario Rojas Quijano': '+525500000001',
-    'Luz María Valencia Quiroz': '+525500000002',
-    'Dania Peñaloza del Rosario': '+525500000003',
-    'Reyna Bautista Galvan': '+525500000004',
-    'Yazmin Sanchez Ramirez': '+525500000005',
-    'Daniel Martinez Pena': '+525500000006',
+function getGestorPhone(promotor) {
+  const gestores = {
+    // Gestores principales
+    'Juan Carlos': '+525515838763',
+    'Lic. Juan Carlos': '+525515838763',
+    'Nery': '+525521975037',
+    'Lic. Nery': '+525521975037',
+    // Cobradores LeGaXi (mapean al gestor más cercano)
+    'Brenda Rosario Rojas Quijano': '+525515838763',
+    'Luz María Valencia Quiroz': '+525521975037',
+    'Dania Peñaloza del Rosario': '+525515838763',
+    'Reyna Bautista Galvan': '+525521975037',
+    'Yazmin Sanchez Ramirez': '+525515838763',
+    'Daniel Martinez Pena': '+525521975037',
   };
-  return map[promotor] || DEFAULT_COBRADOR_PHONE || '+525544621100';
+  
+  // Buscar coincidencia parcial
+  if (promotor) {
+    const key = Object.keys(gestores).find(k => 
+      k.toLowerCase().includes(promotor.toLowerCase()) || 
+      promotor.toLowerCase().includes(k.toLowerCase())
+    );
+    if (key) return gestores[key];
+  }
+  
+  // Default: Lic. Juan Carlos
+  return DEFAULT_GESTOR_PHONE || '+525515838763';
 }
 
 // ============================================================
@@ -471,7 +523,12 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ service: 'LeGaXi IVR Propio', status: 'running', provider: 'telnyx' });
+  const panelPath = path.join(__dirname, 'panel.html');
+  if (fs.existsSync(panelPath)) {
+    res.sendFile(panelPath);
+  } else {
+    res.json({ service: 'LeGaXi IVR Propio', status: 'running', provider: 'telnyx' });
+  }
 });
 
 // ============================================================

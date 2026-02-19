@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeGaXi IVR - Panel de Llamadas</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e17;
+  --surface: #111827;
+  --surface2: #1a2332;
+  --border: #1e2d3d;
+  --accent: #ef4444;
+  --accent2: #f97316;
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --yellow: #eab308;
+  --text: #e2e8f0;
+  --text2: #94a3b8;
+  --text3: #64748b;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* === LOGIN === */
+.login-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at top, #1a1025 0%, var(--bg) 70%);
+}
+.login-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 48px;
+  width: 400px;
+  text-align: center;
+}
+.login-box h1 {
+  font-family: var(--mono);
+  font-size: 1.8rem;
+  color: var(--accent);
+  margin-bottom: 8px;
+  letter-spacing: -1px;
+}
+.login-box p { color: var(--text3); margin-bottom: 32px; font-size: 0.9rem; }
+.login-box input {
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 1rem;
+  margin-bottom: 16px;
+  outline: none;
+  font-family: var(--mono);
+}
+.login-box input:focus { border-color: var(--accent); }
+.login-box button {
+  width: 100%;
+  padding: 14px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: all 0.2s;
+}
+.login-box button:hover { background: #dc2626; transform: translateY(-1px); }
+
+/* === MAIN LAYOUT === */
+.app { display: none; }
+.app.active { display: block; }
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.topbar-left { display: flex; align-items: center; gap: 16px; }
+.topbar h1 {
+  font-family: var(--mono);
+  font-size: 1.2rem;
+  color: var(--accent);
+  letter-spacing: -0.5px;
+}
+.topbar .status-dot {
+  width: 8px; height: 8px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity:1; }
+  50% { opacity:0.4; }
+}
+.topbar .server-info {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text3);
+}
+.topbar-right { display: flex; gap: 12px; align-items: center; }
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: #dc2626; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--text3); }
+.btn-green { background: var(--green); color: white; }
+.btn-green:hover { background: #16a34a; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+/* === TABS === */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 32px;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  width: fit-content;
+}
+.tab {
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text3);
+  transition: all 0.2s;
+  border: none;
+  background: none;
+  font-family: var(--sans);
+}
+.tab.active { background: var(--accent); color: white; }
+.tab:hover:not(.active) { color: var(--text); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* === UPLOAD SECTION === */
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  padding: 60px 40px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: var(--surface);
+  position: relative;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--accent);
+  background: rgba(239,68,68,0.05);
+}
+.upload-zone .icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+}
+.upload-zone h3 { font-size: 1.1rem; margin-bottom: 8px; }
+.upload-zone p { color: var(--text3); font-size: 0.85rem; }
+.upload-zone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.file-info {
+  display: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 20px;
+}
+.file-info.active { display: block; }
+
+/* === TABLE === */
+.table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 20px;
+}
+.table-header {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.table-header h3 { font-size: 0.95rem; }
+.table-header span { font-family: var(--mono); font-size: 0.8rem; color: var(--text3); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+thead { background: var(--surface2); }
+th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text2);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+td {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+tr:hover { background: rgba(255,255,255,0.02); }
+.table-scroll { max-height: 400px; overflow-y: auto; }
+
+/* === CAMPAIGN CONTROLS === */
+.campaign-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 24px;
+}
+.control-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+.control-card h4 {
+  font-size: 0.85rem;
+  color: var(--text2);
+  margin-bottom: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.control-card input, .control-card select {
+  width: 100%;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  margin-bottom: 12px;
+  outline: none;
+  font-family: var(--mono);
+}
+.control-card input:focus, .control-card select:focus { border-color: var(--accent); }
+
+/* === STATS GRID === */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+.stat-card .num {
+  font-family: var(--mono);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.stat-card .label {
+  font-size: 0.75rem;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-card.total .num { color: var(--blue); }
+.stat-card.contestadas .num { color: var(--green); }
+.stat-card.promesas .num { color: var(--yellow); }
+.stat-card.pagos .num { color: #22d3ee; }
+.stat-card.sinresp .num { color: var(--text3); }
+
+/* === PROGRESS === */
+.progress-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.progress-bar-wrap {
+  height: 12px;
+  background: var(--bg);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 16px 0;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--green));
+  border-radius: 6px;
+  width: 0%;
+  transition: width 0.5s ease;
+}
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text2);
+}
+.campaign-status {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  text-transform: uppercase;
+}
+.status-running { background: rgba(34,197,94,0.15); color: var(--green); }
+.status-completed { background: rgba(59,130,246,0.15); color: var(--blue); }
+.status-cancelled { background: rgba(239,68,68,0.15); color: var(--accent); }
+
+/* === RESULTS LOG === */
+.results-log {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.result-item {
+  display: grid;
+  grid-template-columns: 1fr 140px 100px 160px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  align-items: center;
+}
+.result-item:last-child { border-bottom: none; }
+.result-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  text-align: center;
+  text-transform: uppercase;
+}
+.badge-promesa { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.badge-pago { background: rgba(34,211,238,0.15); color: #22d3ee; }
+.badge-transfer { background: rgba(59,130,246,0.15); color: var(--blue); }
+.badge-nocontesto { background: rgba(100,116,139,0.15); color: var(--text3); }
+.badge-sinresp { background: rgba(148,163,184,0.1); color: var(--text3); }
+.badge-error { background: rgba(239,68,68,0.15); color: var(--accent); }
+.badge-ocupado { background: rgba(249,115,22,0.15); color: var(--accent2); }
+
+/* === LAUNCH BUTTON === */
+.launch-section {
+  margin-top: 24px;
+  text-align: center;
+}
+.btn-launch {
+  padding: 18px 60px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), #b91c1c);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: all 0.3s;
+  letter-spacing: 0.5px;
+}
+.btn-launch:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(239,68,68,0.3); }
+.btn-launch:disabled { opacity:0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+/* === RESPONSIVE === */
+@media (max-width: 768px) {
+  .main { padding: 16px; }
+  .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .campaign-controls { grid-template-columns: 1fr; }
+  .result-item { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .topbar { padding: 12px 16px; }
+}
+
+/* === SCROLLBAR === */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <h1>LeGaXi IVR</h1>
+    <p>Sistema de Llamadas Automáticas</p>
+    <input type="text" id="loginServer" placeholder="URL del servidor" value="https://legaxi-ivr.onrender.com">
+    <input type="password" id="loginKey" placeholder="API Key">
+    <button onclick="doLogin()">Conectar</button>
+    <p id="loginError" style="color:var(--accent);margin-top:12px;font-size:0.8rem;display:none"></p>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="app" id="appMain">
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>📞 LeGaXi IVR</h1>
+      <div class="status-dot"></div>
+      <span class="server-info" id="serverInfo">Conectado</span>
+    </div>
+    <div class="topbar-right">
+      <span style="font-family:var(--mono);font-size:0.75rem;color:var(--text3)" id="creditInfo"></span>
+      <button class="btn btn-secondary" onclick="doLogout()">Salir</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- TABS -->
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('upload')">📁 Cargar Archivo</button>
+      <button class="tab" onclick="switchTab('campaign')">🚀 Campaña Activa</button>
+      <button class="tab" onclick="switchTab('history')">📊 Historial</button>
+    </div>
+
+    <!-- TAB: UPLOAD -->
+    <div class="tab-content active" id="tab-upload">
+      <div class="upload-zone" id="uploadZone">
+        <div class="icon">📂</div>
+        <h3>Arrastra tu archivo CSV o Excel aquí</h3>
+        <p>O haz click para seleccionar. Columnas: Nombre, Teléfono, Saldo, DíasAtraso, Tarifa, Promotor</p>
+        <input type="file" accept=".csv,.xlsx,.xls" onchange="handleFile(this.files[0])" id="fileInput">
+      </div>
+
+      <div class="file-info" id="fileInfo">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div>
+            <h3 id="fileName" style="font-size:1rem"></h3>
+            <span id="fileStats" style="font-family:var(--mono);font-size:0.8rem;color:var(--text3)"></span>
+          </div>
+          <button class="btn btn-secondary" onclick="clearFile()">✕ Quitar</button>
+        </div>
+      </div>
+
+      <!-- PREVIEW TABLE -->
+      <div class="table-wrap" id="previewTable" style="display:none">
+        <div class="table-header">
+          <h3>Vista Previa</h3>
+          <span id="previewCount"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Saldo</th>
+                <th>Días Atraso</th>
+                <th>Tarifa</th>
+                <th>Promotor</th>
+              </tr>
+            </thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- CAMPAIGN CONFIG -->
+      <div class="campaign-controls" id="campaignConfig" style="display:none">
+        <div class="control-card">
+          <h4>Configuración</h4>
+          <input type="text" id="campName" placeholder="Nombre de campaña (opcional)">
+          <input type="text" id="campCobrador" placeholder="Cobrador / Responsable">
+        </div>
+        <div class="control-card">
+          <h4>Filtros</h4>
+          <input type="number" id="filtroMinDias" placeholder="Mín. días atraso (ej: 5)">
+          <input type="number" id="filtroMinSaldo" placeholder="Mín. saldo (ej: 500)">
+          <div style="margin-top:8px">
+            <span style="font-family:var(--mono);font-size:0.8rem;color:var(--text2)">
+              Clientes filtrados: <strong id="filteredCount" style="color:var(--accent)">0</strong>
+            </span>
+            <button class="btn btn-secondary" style="float:right;padding:6px 12px;font-size:0.75rem" onclick="applyFilters()">Aplicar Filtros</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAUNCH -->
+      <div class="launch-section" id="launchSection" style="display:none">
+        <button class="btn-launch" id="btnLaunch" onclick="startCampaign()">
+          🚀 INICIAR LLAMADAS
+        </button>
+        <p style="color:var(--text3);font-size:0.8rem;margin-top:12px">
+          Cada llamada tiene costo de ~$0.01-0.02 USD
+        </p>
+      </div>
+    </div>
+
+    <!-- TAB: CAMPAIGN ACTIVE -->
+    <div class="tab-content" id="tab-campaign">
+      <div id="noCampaign" style="text-align:center;padding:60px;color:var(--text3)">
+        <div style="font-size:3rem;margin-bottom:16px">📵</div>
+        <h3>Sin campaña activa</h3>
+        <p>Carga un archivo y lanza una campaña</p>
+      </div>
+
+      <div id="activeCampaign" style="display:none">
+        <!-- STATS -->
+        <div class="stats-grid">
+          <div class="stat-card total">
+            <div class="num" id="statTotal">0</div>
+            <div class="label">Total</div>
+          </div>
+          <div class="stat-card contestadas">
+            <div class="num" id="statContestadas">0</div>
+            <div class="label">Contestadas</div>
+          </div>
+          <div class="stat-card promesas">
+            <div class="num" id="statPromesas">0</div>
+            <div class="label">Promesas</div>
+          </div>
+          <div class="stat-card pagos">
+            <div class="num" id="statPagos">0</div>
+            <div class="label">Ya Pagaron</div>
+          </div>
+          <div class="stat-card sinresp">
+            <div class="num" id="statSinResp">0</div>
+            <div class="label">Sin Respuesta</div>
+          </div>
+        </div>
+
+        <!-- PROGRESS -->
+        <div class="progress-section">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <span class="campaign-status status-running" id="campStatus">EN PROGRESO</span>
+              <span style="margin-left:12px;font-size:0.85rem;color:var(--text2)" id="campNameDisplay"></span>
+            </div>
+            <button class="btn btn-secondary" id="btnCancel" onclick="cancelCampaign()" style="padding:8px 16px;font-size:0.8rem">⏹ Cancelar</button>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" id="progressBar"></div>
+          </div>
+          <div class="progress-info">
+            <span id="progressText">0 / 0 llamadas</span>
+            <span id="progressPercent">0%</span>
+          </div>
+        </div>
+
+        <!-- RESULTS LOG -->
+        <div class="results-log" id="resultsLog">
+          <div class="table-header">
+            <h3>Resultados en Vivo</h3>
+            <button class="btn btn-secondary" onclick="exportResults()" style="padding:6px 12px;font-size:0.75rem">📥 Exportar CSV</button>
+          </div>
+          <div id="resultsBody" style="max-height:400px;overflow-y:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: HISTORY -->
+    <div class="tab-content" id="tab-history">
+      <div style="text-align:center;padding:60px;color:var(--text3)">
+        <div style="font-size:3rem;margin-bottom:16px">📊</div>
+        <h3>Historial de Campañas</h3>
+        <p>Los resultados se guardan en tu Google Sheet automáticamente</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SHEETJS for Excel parsing -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+let SERVER = '';
+let APIKEY = '';
+let allClients = [];
+let filteredClients = [];
+let currentCampaignId = null;
+let pollInterval = null;
+
+// ============================================================
+// LOGIN
+// ============================================================
+function doLogin() {
+  SERVER = document.getElementById('loginServer').value.replace(/\/+$/, '');
+  APIKEY = document.getElementById('loginKey').value;
+
+  fetch(`${SERVER}/health`)
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === 'ok') {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('appMain').classList.add('active');
+        document.getElementById('serverInfo').textContent = `${SERVER} | Telnyx`;
+        localStorage.setItem('ivr_server', SERVER);
+        localStorage.setItem('ivr_key', APIKEY);
+      }
+    })
+    .catch(() => {
+      document.getElementById('loginError').textContent = 'No se pudo conectar al servidor';
+      document.getElementById('loginError').style.display = 'block';
+    });
+}
+
+function doLogout() {
+  localStorage.removeItem('ivr_server');
+  localStorage.removeItem('ivr_key');
+  location.reload();
+}
+
+// Auto-login
+window.addEventListener('load', () => {
+  const s = localStorage.getItem('ivr_server');
+  const k = localStorage.getItem('ivr_key');
+  if (s && k) {
+    document.getElementById('loginServer').value = s;
+    document.getElementById('loginKey').value = k;
+    doLogin();
+  }
+});
+
+// ============================================================
+// TABS
+// ============================================================
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById(`tab-${tab}`).classList.add('active');
+}
+
+// ============================================================
+// FILE UPLOAD & PARSING
+// ============================================================
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+
+function handleFile(file) {
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  document.getElementById('fileName').textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    let data;
+    if (ext === 'csv') {
+      data = parseCSV(e.target.result);
+    } else {
+      const wb = XLSX.read(e.target.result, { type: 'binary' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      data = XLSX.utils.sheet_to_json(ws);
+    }
+
+    allClients = normalizeData(data);
+    filteredClients = [...allClients];
+
+    document.getElementById('fileStats').textContent = `${allClients.length} clientes cargados`;
+    document.getElementById('fileInfo').classList.add('active');
+    document.getElementById('previewTable').style.display = 'block';
+    document.getElementById('campaignConfig').style.display = 'grid';
+    document.getElementById('launchSection').style.display = 'block';
+    document.getElementById('filteredCount').textContent = allClients.length;
+    document.getElementById('previewCount').textContent = `${allClients.length} registros`;
+
+    renderPreview(allClients);
+  };
+
+  if (ext === 'csv') reader.readAsText(file);
+  else reader.readAsBinaryString(file);
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  return lines.slice(1).map(line => {
+    const vals = line.split(',').map(v => v.trim().replace(/"/g, ''));
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = vals[i] || '');
+    return obj;
+  });
+}
+
+function normalizeData(data) {
+  return data.map(row => {
+    // Try different column name formats
+    const nombre = row.Nombre || row.nombre || row.NOMBRE || row.Name || row.name || '';
+    const telefono = row.Teléfono || row.Telefono || row.telefono || row.TELEFONO || row.Phone || row.phone || row.Tel || row.tel || '';
+    const saldo = Number(row.Saldo || row.saldo || row.SALDO || row.Balance || row.balance || 0);
+    const diasAtraso = Number(row.DíasAtraso || row.DiasAtraso || row.diasAtraso || row['Días Atraso'] || row['Dias Atraso'] || row.dias_atraso || row.DaysOverdue || 0);
+    const tarifa = Number(row.Tarifa || row.tarifa || row.TARIFA || row.PagoMinimo || row.pago_minimo || row.MinPayment || saldo * 0.1 || 0);
+    const promotor = row.Promotor || row.promotor || row.PROMOTOR || row.Cobrador || row.cobrador || row.Collector || '';
+
+    return { nombre, telefono, saldo, diasAtraso, tarifa, promotor };
+  }).filter(c => c.nombre && c.telefono);
+}
+
+function renderPreview(clients) {
+  const body = document.getElementById('previewBody');
+  body.innerHTML = clients.slice(0, 50).map((c, i) => `
+    <tr>
+      <td style="color:var(--text3)">${i + 1}</td>
+      <td style="color:var(--text)">${c.nombre}</td>
+      <td>${c.telefono}</td>
+      <td style="color:var(--yellow)">$${c.saldo.toLocaleString()}</td>
+      <td style="color:${c.diasAtraso > 30 ? 'var(--accent)' : 'var(--text2)'}">${c.diasAtraso}</td>
+      <td>$${c.tarifa.toLocaleString()}</td>
+      <td style="color:var(--text3)">${c.promotor}</td>
+    </tr>
+  `).join('');
+  if (clients.length > 50) {
+    body.innerHTML += `<tr><td colspan="7" style="text-align:center;color:var(--text3)">... y ${clients.length - 50} más</td></tr>`;
+  }
+}
+
+function clearFile() {
+  allClients = [];
+  filteredClients = [];
+  document.getElementById('fileInfo').classList.remove('active');
+  document.getElementById('previewTable').style.display = 'none';
+  document.getElementById('campaignConfig').style.display = 'none';
+  document.getElementById('launchSection').style.display = 'none';
+  document.getElementById('fileInput').value = '';
+}
+
+function applyFilters() {
+  const minDias = Number(document.getElementById('filtroMinDias').value) || 0;
+  const minSaldo = Number(document.getElementById('filtroMinSaldo').value) || 0;
+
+  filteredClients = allClients.filter(c =>
+    c.diasAtraso >= minDias && c.saldo >= minSaldo
+  );
+
+  document.getElementById('filteredCount').textContent = filteredClients.length;
+  document.getElementById('previewCount').textContent = `${filteredClients.length} registros filtrados`;
+  renderPreview(filteredClients);
+}
+
+// ============================================================
+// START CAMPAIGN
+// ============================================================
+async function startCampaign() {
+  if (!filteredClients.length) return alert('No hay clientes para llamar');
+
+  const btn = document.getElementById('btnLaunch');
+  btn.disabled = true;
+  btn.textContent = '⏳ Iniciando...';
+
+  try {
+    const resp = await fetch(`${SERVER}/api/campaign/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': APIKEY },
+      body: JSON.stringify({
+        clients: filteredClients,
+        cobrador: document.getElementById('campCobrador').value || 'Sistema',
+        campaignName: document.getElementById('campName').value || undefined
+      })
+    });
+
+    const data = await resp.json();
+    if (data.success) {
+      currentCampaignId = data.campaignId;
+      switchTab('campaign');
+      document.querySelectorAll('.tab')[1].click();
+      showActiveCampaign(data.total);
+      startPolling();
+    } else {
+      alert('Error: ' + (data.error || 'Desconocido'));
+    }
+  } catch (e) {
+    alert('Error conectando: ' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🚀 INICIAR LLAMADAS';
+}
+
+function showActiveCampaign(total) {
+  document.getElementById('noCampaign').style.display = 'none';
+  document.getElementById('activeCampaign').style.display = 'block';
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('campNameDisplay').textContent =
+    document.getElementById('campName').value || `Campaña ${new Date().toLocaleDateString('es-MX')}`;
+  document.getElementById('resultsBody').innerHTML = '';
+  document.getElementById('progressBar').style.width = '0%';
+  updateStats({ total, completed: 0, results: [] });
+}
+
+// ============================================================
+// POLLING
+// ============================================================
+function startPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollCampaign, 3000);
+}
+
+async function pollCampaign() {
+  if (!currentCampaignId) return;
+
+  try {
+    const resp = await fetch(`${SERVER}/api/campaign/${currentCampaignId}`, {
+      headers: { 'x-api-key': APIKEY }
+    });
+    const data = await resp.json();
+    updateStats(data);
+
+    if (data.status === 'completed' || data.status === 'cancelled' || data.status === 'error') {
+      clearInterval(pollInterval);
+      pollInterval = null;
+
+      const statusEl = document.getElementById('campStatus');
+      if (data.status === 'completed') {
+        statusEl.textContent = 'COMPLETADA';
+        statusEl.className = 'campaign-status status-completed';
+      } else {
+        statusEl.textContent = data.status.toUpperCase();
+        statusEl.className = 'campaign-status status-cancelled';
+      }
+      document.getElementById('btnCancel').style.display = 'none';
+    }
+  } catch (e) {
+    console.error('Poll error:', e);
+  }
+}
+
+function updateStats(data) {
+  const total = data.total || 0;
+  const completed = data.completed || 0;
+  const results = data.results || [];
+
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressText').textContent = `${completed} / ${total} llamadas`;
+  document.getElementById('progressPercent').textContent = pct + '%';
+
+  const promesas = results.filter(r => r.resultado === 'promesa_pago').length;
+  const pagos = results.filter(r => r.resultado === 'ya_pago').length;
+  const transfers = results.filter(r => r.resultado === 'transferencia').length;
+  const sinResp = results.filter(r => ['sin_respuesta', 'no_contesto', 'ocupado', 'fallida'].includes(r.resultado)).length;
+  const contestadas = promesas + pagos + transfers;
+
+  document.getElementById('statContestadas').textContent = contestadas;
+  document.getElementById('statPromesas').textContent = promesas;
+  document.getElementById('statPagos').textContent = pagos;
+  document.getElementById('statSinResp').textContent = sinResp;
+
+  // Render results
+  const body = document.getElementById('resultsBody');
+  body.innerHTML = results.slice().reverse().map(r => {
+    const badgeClass = {
+      'promesa_pago': 'badge-promesa',
+      'ya_pago': 'badge-pago',
+      'transferencia': 'badge-transfer',
+      'no_contesto': 'badge-nocontesto',
+      'sin_respuesta': 'badge-sinresp',
+      'ocupado': 'badge-ocupado',
+      'error': 'badge-error',
+      'fallida': 'badge-error'
+    }[r.resultado] || 'badge-sinresp';
+
+    const badgeText = {
+      'promesa_pago': 'Promesa',
+      'ya_pago': 'Ya Pagó',
+      'transferencia': 'Transfer',
+      'no_contesto': 'No Contestó',
+      'sin_respuesta': 'Sin Resp',
+      'ocupado': 'Ocupado',
+      'error': 'Error',
+      'fallida': 'Fallida'
+    }[r.resultado] || r.resultado;
+
+    const time = r.fecha ? new Date(r.fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }) : '';
+
+    return `<div class="result-item">
+      <span style="color:var(--text)">${r.nombre || ''}</span>
+      <span style="font-family:var(--mono);font-size:0.75rem;color:var(--text3)">${r.telefono || ''}</span>
+      <span class="result-badge ${badgeClass}">${badgeText}</span>
+      <span style="font-family:var(--mono);font-size:0.7rem;color:var(--text3)">${time}</span>
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// CANCEL / EXPORT
+// ============================================================
+async function cancelCampaign() {
+  if (!currentCampaignId || !confirm('¿Cancelar campaña?')) return;
+  try {
+    await fetch(`${SERVER}/api/campaign/${currentCampaignId}/cancel`, {
+      method: 'POST',
+      headers: { 'x-api-key': APIKEY }
+    });
+  } catch (e) { console.error(e); }
+}
+
+function exportResults() {
+  fetch(`${SERVER}/api/campaign/${currentCampaignId}`, {
+    headers: { 'x-api-key': APIKEY }
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.results?.length) return alert('Sin resultados');
+    const headers = ['Fecha', 'Nombre', 'Teléfono', 'Saldo', 'DíasAtraso', 'Promotor', 'Resultado', 'Detalle'];
+    const rows = data.results.map(r => [
+      r.fecha, r.nombre, r.telefono, r.saldo, r.diasAtraso, r.promotor, r.resultado, r.detalle
+    ]);
+    const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${v}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `resultados_${currentCampaignId}.csv`;
+    a.click();
+  });
+}
+</script>
+</body>
+</html>
