@@ -168,8 +168,9 @@ app.post('/telnyx/webhook', async (req, res) => {
 
       case 'call.answered': {
         // ¡Contestaron! Generar y reproducir audio
+        // Si no hay clientData, es una llamada transferida (gestor) — no hacer nada
         if (!clientData) {
-          await telnyxCommand(callControlId, 'hangup', { client_state: clientStateB64 });
+          console.log(`📲 Gestor contestó la transferencia — no interferir`);
           break;
         }
 
@@ -315,6 +316,9 @@ app.post('/telnyx/webhook', async (req, res) => {
         // Llamada terminó
         if (callControlId) activeCalls.delete(callControlId);
         
+        // Ignorar hangups de llamadas sin campaña (transferencias a gestores)
+        if (!campaignId || !campaign) break;
+
         const hangupCause = event.payload?.hangup_cause;
         if (hangupCause && hangupCause !== 'normal_clearing' && hangupCause !== 'originator_cancel') {
           const causeMap = {
