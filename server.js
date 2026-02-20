@@ -1,5 +1,5 @@
 // ============================================================
-// LeGaXi IVR PROPIO - Telnyx Call Control API
+// LeGaXi IVR PROPIO - SignalWire Compatibility API (cXML/LaML)
 // Llamadas automáticas con IVR interactivo
 // ============================================================
 const express = require('express');
@@ -13,11 +13,12 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 const {
-  TELNYX_API_KEY,
-  TELNYX_CONNECTION_ID,
-  TELNYX_FROM_NUMBER,      // +525544621100
+  SW_PROJECT_ID,         // 02c0fddc-b824-42f4-a3a5-02701ae32e93
+  SW_API_TOKEN,          // PT5d55e752d42c...
+  SW_SPACE_URL,          // legaxiii.signalwire.com
+  SW_FROM_NUMBER,        // +1XXXXXXXXXX (número comprado en SignalWire)
   GAS_WEBHOOK_URL,
-  SERVER_URL,              // https://legaxi-ivr.onrender.com
+  SERVER_URL,            // https://legaxi-ivr.onrender.com
   API_KEY,
   DEFAULT_GESTOR_PHONE,
   PORT = 3000
@@ -44,7 +45,7 @@ function auth(req, res, next) {
 
 // Estado de campañas y llamadas activas
 const campaigns = new Map();
-const activeCalls = new Map(); // call_control_id -> { campaignId, index, clientData }
+const callDataMap = new Map(); // callSid -> { campaignId, index, clientData }
 
 // ============================================================
 // EDGE TTS - Audio personalizado GRATIS
@@ -64,39 +65,33 @@ async function generateAudio(text, filename) {
   });
 }
 
+// ============================================================
+// MENSAJES ESCALONADOS POR NIVEL DE ATRASO
+// ============================================================
 function buildMensaje(c) {
   const sF = Number(c.saldo).toLocaleString('es-MX', { minimumFractionDigits: 0 });
   const tF = Number(c.tarifa).toLocaleString('es-MX', { minimumFractionDigits: 0 });
   const nom = (c.nombre || '').replace(/[°•*"\\#]/g, '');
-  // Extraer nombre y apellido para sonar más formal
   const partes = nom.trim().split(/\s+/);
-  const nombreCorto = partes[0]; // Solo primer nombre para respuestas
+  const nombreCorto = partes[0];
   const dias = Number(c.diasAtraso) || 0;
   
   const saludo = getHoraSaludo();
   const opciones = `Para hacer una promesa de pago, marque 1. Para hablar con su gestor, marque 2. Si ya realizó su pago, marque 3.`;
   
-  // NIVEL 1: Recordatorio amable (1-15 días)
   if (dias <= 15) {
     return `${saludo}. ¿Hablo con ${nom}? Le llamamos de LeGaXi Asociados. LMV Credia nos ha solicitado contactarle respecto a su pagaré, el cual presenta un saldo de ${sF} pesos con ${dias} días de atraso. ${nombreCorto}, su pago mínimo es de ${tF} pesos. Le invitamos a regularizar su situación para evitar cargos adicionales. ${opciones}`;
   }
-  
-  // NIVEL 2: Seguimiento firme (16-30 días)
   if (dias <= 30) {
     return `${saludo}. ¿Hablo con ${nom}? Le llamamos de LeGaXi Asociados en carácter de urgente. LMV Credia asignó su pagaré para cobro por un adeudo de ${sF} pesos. ${nombreCorto}, su cuenta tiene ${dias} días de atraso y esto está generando intereses y afectación a su historial crediticio. Su pago mínimo es de ${tF} pesos. Es importante que regularice su situación a la brevedad. ${opciones}`;
   }
-  
-  // NIVEL 3: Presión fuerte (31-60 días)
   if (dias <= 60) {
     return `${saludo}. Esta llamada es para ${nom}. Le comunicamos de LeGaXi Asociados, despacho de cobranza autorizado por LMV Credia. Su pagaré presenta un adeudo vencido de ${sF} pesos con ${dias} días de atraso. ${nombreCorto}, le informamos que de no regularizar su cuenta, se procederá con las acciones de cobro correspondientes conforme a la ley. Su pago mínimo para evitar esto es de ${tF} pesos. ${opciones}`;
   }
-  
-  // NIVEL 4: Máxima presión (61+ días)
   return `${saludo}. Esta llamada va dirigida a ${nom}. Le comunicamos de LeGaXi Asociados, despacho de cobranza legal autorizado por LMV Credia. Su pagaré con un adeudo de ${sF} pesos se encuentra vencido con ${dias} días de atraso. ${nombreCorto}, esta es una notificación formal. Su expediente está en proceso de ser turnado al área legal para iniciar las gestiones de cobro que correspondan. Aún está a tiempo de evitar costos adicionales. Su pago mínimo es de ${tF} pesos. ${opciones}`;
 }
 
 function getHoraSaludo() {
-  // Hora de México (UTC-6)
   const now = new Date();
   const mx = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
   const hora = mx.getHours();
@@ -111,337 +106,261 @@ function buildRespuesta(digit, nombre, dias) {
   
   switch (digit) {
     case '1': {
-      if (d <= 15) {
-        return `Gracias ${n}. Hemos registrado su promesa de pago. Un gestor le contactará para confirmar los detalles y apoyarle con su proceso. Que tenga buen día.`;
-      } else if (d <= 30) {
-        return `${n}, hemos registrado su promesa de pago. Es muy importante que cumpla con el compromiso para evitar que su caso escale. Un gestor le contactará pronto para confirmar. Hasta luego.`;
-      } else {
-        return `${n}, queda registrada su promesa de pago. Le recordamos que el incumplimiento de esta promesa podría acelerar las acciones de cobro. Un gestor le contactará para formalizar el acuerdo. Hasta luego.`;
-      }
+      if (d <= 15) return `Gracias ${n}. Hemos registrado su promesa de pago. Un gestor le contactará para confirmar los detalles y apoyarle con su proceso. Que tenga buen día.`;
+      if (d <= 30) return `${n}, hemos registrado su promesa de pago. Es muy importante que cumpla con el compromiso para evitar que su caso escale. Un gestor le contactará pronto para confirmar. Hasta luego.`;
+      return `${n}, queda registrada su promesa de pago. Le recordamos que el incumplimiento de esta promesa podría acelerar las acciones de cobro. Un gestor le contactará para formalizar el acuerdo. Hasta luego.`;
     }
     case '2': return `Entendido ${n}. Lo estamos comunicando con su gestor asignado. Por favor no cuelgue.`;
     case '3': {
-      if (d <= 30) {
-        return `Gracias ${n}. Registramos que ya realizó su pago. Lo verificaremos en nuestro sistema y se actualizará su cuenta. Buen día.`;
-      } else {
-        return `${n}, tomamos nota de que indica haber realizado su pago. Nuestro equipo lo verificará. Si el pago no se confirma en las próximas 48 horas, se continuará con el proceso de cobro. Hasta luego.`;
-      }
+      if (d <= 30) return `Gracias ${n}. Registramos que ya realizó su pago. Lo verificaremos en nuestro sistema y se actualizará su cuenta. Buen día.`;
+      return `${n}, tomamos nota de que indica haber realizado su pago. Nuestro equipo lo verificará. Si el pago no se confirma en las próximas 48 horas, se continuará con el proceso de cobro. Hasta luego.`;
     }
     default: return `${n}, no recibimos una opción válida. Un gestor se pondrá en contacto con usted. Hasta luego.`;
   }
 }
 
 // ============================================================
-// TELNYX CALL CONTROL - Hacer llamada
-// ============================================================
-async function telnyxCall(phone, campaignId, index) {
-  const resp = await fetch('https://api.telnyx.com/v2/calls', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${TELNYX_API_KEY}`
-    },
-    body: JSON.stringify({
-      connection_id: TELNYX_CONNECTION_ID,
-      to: phone,
-      from: TELNYX_FROM_NUMBER,
-      answering_machine_detection: 'disabled',
-      webhook_url: `${SERVER_URL}/telnyx/webhook`,
-      webhook_url_method: 'POST',
-      client_state: Buffer.from(JSON.stringify({ campaignId, index })).toString('base64'),
-      timeout_secs: 25
-    })
-  });
-
-  const data = await resp.json();
-  if (data.data && data.data.call_control_id) {
-    console.log(`📞 Llamando: campaña=${campaignId} index=${index} callId=${data.data.call_control_id}`);
-  }
-  if (data.errors && data.errors.length > 0) {
-    throw new Error(data.errors[0].detail || 'Error en llamada Telnyx');
-  }
-  return data;
-}
-
-// ============================================================
-// TELNYX CALL CONTROL - Comandos
-// ============================================================
-async function telnyxCommand(callControlId, command, params = {}) {
-  const url = `https://api.telnyx.com/v2/calls/${callControlId}/actions/${command}`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${TELNYX_API_KEY}`
-    },
-    body: JSON.stringify(params)
-  });
-  const data = await resp.json();
-  if (data.errors && data.errors.length > 0) {
-    console.error(`Telnyx ${command} error:`, data.errors[0].detail);
-  }
-  return data;
-}
-
-// ============================================================
-// WEBHOOK - Telnyx envía eventos aquí
-// ============================================================
-app.post('/telnyx/webhook', async (req, res) => {
-  res.sendStatus(200); // Responder rápido
-
-  const event = req.body.data;
-  if (!event) return;
-
-  const eventType = event.event_type;
-  const callControlId = event.payload?.call_control_id;
-  const clientStateB64 = event.payload?.client_state;
-
-  let state = {};
-  if (clientStateB64) {
-    try { state = JSON.parse(Buffer.from(clientStateB64, 'base64').toString()); } catch(e) {}
-  }
-
-  const { campaignId, index } = state;
-  const campaign = campaigns.get(campaignId);
-  const clientData = campaign?.clients?.[parseInt(index)];
-
-  console.log(`📩 Evento: ${eventType} | Campaña: ${campaignId} | Index: ${index}`);
-
-  try {
-    switch (eventType) {
-      case 'call.initiated':
-        // Llamada iniciada, esperando que contesten
-        if (callControlId) {
-          activeCalls.set(callControlId, { campaignId, index, clientData });
-        }
-        break;
-
-      case 'call.answered': {
-        // ¡Contestaron! Generar y reproducir audio
-        // Si no hay clientData, es una llamada transferida (gestor) — no hacer nada
-        if (!clientData) {
-          console.log(`📲 Gestor contestó la transferencia — no interferir`);
-          break;
-        }
-
-        const msg = buildMensaje(clientData);
-        const hash = crypto.createHash('md5').update(msg).digest('hex');
-        const audioFile = `msg_${hash}.mp3`;
-        let audioUrl;
-
-        try {
-          audioUrl = await generateAudio(msg, audioFile);
-        } catch (e) {
-          console.error('TTS error:', e.message);
-          audioUrl = null;
-        }
-
-        if (audioUrl) {
-          // Reproducir audio y capturar DTMF
-          await telnyxCommand(callControlId, 'gather_using_audio', {
-            audio_url: audioUrl,
-            minimum_digits: 1,
-            maximum_digits: 1,
-            timeout_millis: 12000,
-            inter_digit_timeout_millis: 5000,
-            valid_digits: '123',
-            client_state: clientStateB64
-          });
-        } else {
-          // Fallback: usar TTS de Telnyx (speak)
-          await telnyxCommand(callControlId, 'gather_using_speak', {
-            payload: msg,
-            voice: 'female',
-            language: 'es-MX',
-            minimum_digits: 1,
-            maximum_digits: 1,
-            timeout_millis: 12000,
-            inter_digit_timeout_millis: 5000,
-            valid_digits: '123',
-            client_state: clientStateB64
-          });
-        }
-        break;
-      }
-
-      case 'call.gather.ended': {
-        // El cliente presionó una tecla
-        const digits = event.payload?.digits;
-        const nombre = clientData?.nombre || 'Cliente';
-        const diasAtraso = clientData?.diasAtraso || 0;
-
-        if (digits) {
-          const resultMap = { '1': 'promesa_pago', '2': 'transferencia', '3': 'ya_pago' };
-          const detalleMap = { '1': 'Promesa de pago', '2': 'Pidió hablar con gestor', '3': 'Ya pagó' };
-          logResult(campaignId, index, resultMap[digits] || 'opcion_invalida', detalleMap[digits] || `Tecla: ${digits}`);
-
-          if (digits === '2') {
-            // TRANSFERENCIA EN VIVO al gestor
-            const gestorPhone = getGestorPhone(clientData?.promotor);
-            const respMsg = buildRespuesta('2', nombre, diasAtraso);
-            
-            try {
-              const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
-              const respUrl = await generateAudio(respMsg, `resp_${respHash}.mp3`);
-              // Reproducir mensaje antes de transferir
-              await telnyxCommand(callControlId, 'playback_start', {
-                audio_url: respUrl,
-                client_state: Buffer.from(JSON.stringify({ campaignId, index, action: 'transfer', gestorPhone })).toString('base64')
-              });
-            } catch (e) {
-              await telnyxCommand(callControlId, 'speak', {
-                payload: respMsg,
-                voice: 'female',
-                language: 'es-MX',
-                client_state: Buffer.from(JSON.stringify({ campaignId, index, action: 'transfer', gestorPhone })).toString('base64')
-              });
-            }
-          } else {
-            // Teclas 1, 3 u otra - reproducir respuesta y colgar después
-            const respMsg = buildRespuesta(digits, nombre, diasAtraso);
-            const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
-            const respFile = `resp_${respHash}.mp3`;
-            const hangupState = Buffer.from(JSON.stringify({ campaignId, index, action: 'hangup' })).toString('base64');
-
-            try {
-              const respUrl = await generateAudio(respMsg, respFile);
-              await telnyxCommand(callControlId, 'playback_start', {
-                audio_url: respUrl,
-                client_state: hangupState
-              });
-            } catch (e) {
-              await telnyxCommand(callControlId, 'speak', {
-                payload: respMsg,
-                voice: 'female',
-                language: 'es-MX',
-                client_state: hangupState
-              });
-            }
-          }
-        } else {
-          // No presionó nada (timeout)
-          logResult(campaignId, index, 'sin_respuesta', 'No presionó ninguna tecla');
-          const hangupState = Buffer.from(JSON.stringify({ campaignId, index, action: 'hangup' })).toString('base64');
-          try {
-            const noRespMsg = 'No recibimos su respuesta. Le volveremos a contactar. Hasta luego.';
-            const noRespHash = crypto.createHash('md5').update(noRespMsg).digest('hex');
-            const noRespUrl = await generateAudio(noRespMsg, `noresp_${noRespHash}.mp3`);
-            await telnyxCommand(callControlId, 'playback_start', {
-              audio_url: noRespUrl,
-              client_state: hangupState
-            });
-          } catch (e) {
-            await telnyxCommand(callControlId, 'speak', {
-              payload: 'No recibimos su respuesta. Hasta luego.',
-              voice: 'female',
-              language: 'es-MX',
-              client_state: hangupState
-            });
-          }
-        }
-        break;
-      }
-
-      case 'call.playback.ended':
-      case 'call.speak.ended': {
-        // Solo actuar si hay una acción pendiente en el state
-        if (state.action === 'transfer' && state.gestorPhone) {
-          // Transferir al gestor EN VIVO
-          console.log(`📲 Transfiriendo a gestor: ${state.gestorPhone}`);
-          await telnyxCommand(callControlId, 'transfer', {
-            to: state.gestorPhone,
-            from: TELNYX_FROM_NUMBER,
-            timeout_secs: 30,
-            client_state: clientStateB64
-          });
-        } else if (state.action === 'hangup') {
-          // Respuesta terminó, ahora sí colgar
-          await telnyxCommand(callControlId, 'hangup', { client_state: clientStateB64 });
-        }
-        // Si no hay action, es el playback del gather — NO hacer nada, esperar DTMF
-        break;
-      }
-
-      case 'call.hangup':
-      case 'call.machine.detection.ended':
-        // Llamada terminó
-        if (callControlId) activeCalls.delete(callControlId);
-        
-        // Ignorar hangups de llamadas sin campaña (transferencias a gestores)
-        if (!campaignId || !campaign) break;
-
-        const hangupCause = event.payload?.hangup_cause;
-        if (hangupCause && hangupCause !== 'normal_clearing' && hangupCause !== 'originator_cancel') {
-          const causeMap = {
-            'user_busy': 'ocupado',
-            'no_answer': 'no_contesto',
-            'call_rejected': 'rechazada',
-            'unallocated_number': 'numero_invalido',
-            'network_failure': 'fallida'
-          };
-          const resultado = causeMap[hangupCause] || hangupCause;
-          // Solo loguear si no hay resultado previo para esta llamada
-          if (campaign && !campaign.results.find(r => r.index === index && r.resultado !== 'error')) {
-            logResult(campaignId, index, resultado, `Causa: ${hangupCause}`);
-          }
-        }
-        break;
-
-      default:
-        console.log(`   Evento no manejado: ${eventType}`);
-    }
-  } catch (err) {
-    console.error(`Error procesando evento ${eventType}:`, err.message);
-  }
-});
-
-// ============================================================
 // GESTORES
 // ============================================================
 function getGestorPhone(promotor) {
   const gestores = {
-    // Gestores principales
     'Juan Carlos': '+525515838763',
     'Lic. Juan Carlos': '+525515838763',
     'Nery': '+525521975037',
     'Lic. Nery': '+525521975037',
-    // Cobradores LeGaXi (mapean al gestor más cercano)
     'Brenda Rosario Rojas Quijano': '+525515838763',
     'Luz María Valencia Quiroz': '+525521975037',
+    'Abigail Ramos Molina': '+525515838763',
+    'Antonio Yoab Galicia Flores': '+525521975037',
+    'Araceli Garcia Evagelista': '+525515838763',
+    'Claudia Ivette Pedroza': '+525521975037',
     'Dania Peñaloza del Rosario': '+525515838763',
+    'Daniel Martinez Pena': '+525521975037',
+    'Gregoria Sosa Tellez': '+525515838763',
+    'Lariza Paola Romero Plaza': '+525521975037',
+    'Miriam Martínez Rodriguez': '+525515838763',
     'Reyna Bautista Galvan': '+525521975037',
     'Yazmin Sanchez Ramirez': '+525515838763',
-    'Daniel Martinez Pena': '+525521975037',
   };
-  
-  // Buscar coincidencia parcial
-  if (promotor) {
-    const key = Object.keys(gestores).find(k => 
-      k.toLowerCase().includes(promotor.toLowerCase()) || 
-      promotor.toLowerCase().includes(k.toLowerCase())
-    );
-    if (key) return gestores[key];
-  }
-  
-  // Default: Lic. Juan Carlos
-  return DEFAULT_GESTOR_PHONE || '+525515838763';
+  const key = (promotor || '').trim();
+  return gestores[key] || DEFAULT_GESTOR_PHONE || '+525515838763';
+}
+
+function getNivelCobranza(dias) {
+  if (dias <= 15) return 'NIVEL 1 - Recordatorio';
+  if (dias <= 30) return 'NIVEL 2 - Urgente';
+  if (dias <= 60) return 'NIVEL 3 - Presión';
+  return 'NIVEL 4 - Legal';
+}
+
+function isHorarioPermitido() {
+  const now = new Date();
+  const mx = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
+  const hora = mx.getHours();
+  const dia = mx.getDay();
+  if (dia === 0) return false;
+  if (hora < 8 || hora >= 20) return false;
+  return true;
 }
 
 // ============================================================
-// LOGGING → Google Sheets
+// SIGNALWIRE cXML WEBHOOKS
 // ============================================================
-function logResult(campId, idx, resultado, detalle) {
-  const camp = campaigns.get(campId);
-  if (!camp) return;
-  const cl = camp.clients[parseInt(idx)] || {};
 
+// Webhook principal: cuando contestan la llamada
+// SignalWire hace POST aquí pidiendo instrucciones XML
+app.post('/sw/voice', async (req, res) => {
+  const callSid = req.body.CallSid;
+  const callData = callDataMap.get(callSid);
+
+  if (!callData || !callData.clientData) {
+    // Llamada desconocida, colgar
+    res.type('text/xml');
+    return res.send('<Response><Hangup/></Response>');
+  }
+
+  const { clientData, campaignId, index } = callData;
+
+  try {
+    // Generar audio personalizado
+    const msg = buildMensaje(clientData);
+    const hash = crypto.createHash('md5').update(msg).digest('hex');
+    const audioUrl = await generateAudio(msg, `msg_${hash}.mp3`);
+
+    // Construir cXML: reproducir audio y recoger DTMF
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="dtmf" numDigits="1" timeout="12" action="${SERVER_URL}/sw/gather?cid=${campaignId}&idx=${index}">
+    <Play>${audioUrl}</Play>
+  </Gather>
+  <Redirect>${SERVER_URL}/sw/noinput?cid=${campaignId}&idx=${index}</Redirect>
+</Response>`;
+
+    res.type('text/xml');
+    res.send(xml);
+    console.log(`📩 Contestaron: ${clientData.nombre} | ${getNivelCobranza(clientData.diasAtraso)}`);
+  } catch (e) {
+    // Fallback: usar Say de SignalWire
+    const msg = buildMensaje(clientData);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Gather input="dtmf" numDigits="1" timeout="12" action="${SERVER_URL}/sw/gather?cid=${campaignId}&idx=${index}">
+    <Say language="es-MX" voice="Polly.Mia">${escapeXml(msg)}</Say>
+  </Gather>
+  <Redirect>${SERVER_URL}/sw/noinput?cid=${campaignId}&idx=${index}</Redirect>
+</Response>`;
+    res.type('text/xml');
+    res.send(xml);
+  }
+});
+
+// Webhook: el deudor presionó una tecla
+app.post('/sw/gather', async (req, res) => {
+  const { cid, idx } = req.query;
+  const digits = req.body.Digits;
+  const campaignId = cid;
+  const index = parseInt(idx);
+  const campaign = campaigns.get(campaignId);
+  const clientData = campaign?.clients?.[index];
+  const nombre = clientData?.nombre || 'Cliente';
+  const diasAtraso = clientData?.diasAtraso || 0;
+
+  console.log(`🔢 Tecla ${digits} | ${nombre}`);
+
+  const resultMap = { '1': 'promesa_pago', '2': 'transferencia', '3': 'ya_pago' };
+  const detalleMap = { '1': 'Promesa de pago', '2': 'Pidió hablar con gestor', '3': 'Ya pagó' };
+  logResult(campaignId, index, resultMap[digits] || 'opcion_invalida', detalleMap[digits] || `Tecla: ${digits}`);
+
+  if (digits === '2') {
+    // Registrar solicitud de callback del gestor (sin transferencia en vivo)
+    const respMsg = `Entendido ${(nombre || 'Cliente').split(/\s+/)[0]}. Un gestor le llamará en los próximos minutos para atender su caso. Por favor mantenga su teléfono disponible. Hasta pronto.`;
+    
+    try {
+      const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
+      const respUrl = await generateAudio(respMsg, `resp_${respHash}.mp3`);
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${respUrl}</Play>
+  <Hangup/>
+</Response>`;
+      res.type('text/xml');
+      res.send(xml);
+      console.log(`📲 Solicita gestor: ${nombre} | Promotor: ${clientData?.promotor}`);
+    } catch (e) {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="es-MX" voice="Polly.Mia">${escapeXml(respMsg)}</Say>
+  <Hangup/>
+</Response>`;
+      res.type('text/xml');
+      res.send(xml);
+    }
+  } else {
+    // Tecla 1, 3 u otra — reproducir respuesta y colgar
+    const respMsg = buildRespuesta(digits, nombre, diasAtraso);
+    
+    try {
+      const respHash = crypto.createHash('md5').update(respMsg).digest('hex');
+      const respUrl = await generateAudio(respMsg, `resp_${respHash}.mp3`);
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${respUrl}</Play>
+  <Hangup/>
+</Response>`;
+      res.type('text/xml');
+      res.send(xml);
+    } catch (e) {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="es-MX" voice="Polly.Mia">${escapeXml(respMsg)}</Say>
+  <Hangup/>
+</Response>`;
+      res.type('text/xml');
+      res.send(xml);
+    }
+  }
+});
+
+// Webhook: no presionó ninguna tecla (timeout)
+app.post('/sw/noinput', async (req, res) => {
+  const { cid, idx } = req.query;
+  logResult(cid, parseInt(idx), 'sin_respuesta', 'No presionó ninguna tecla');
+
+  try {
+    const msg = 'No recibimos su respuesta. Le volveremos a contactar. Hasta luego.';
+    const hash = crypto.createHash('md5').update(msg).digest('hex');
+    const audioUrl = await generateAudio(msg, `noresp_${hash}.mp3`);
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play>${audioUrl}</Play>
+  <Hangup/>
+</Response>`;
+    res.type('text/xml');
+    res.send(xml);
+  } catch (e) {
+    res.type('text/xml');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say language="es-MX" voice="Polly.Mia">No recibimos su respuesta. Hasta luego.</Say>
+  <Hangup/>
+</Response>`);
+  }
+  console.log(`⏰ Sin respuesta | Campaña: ${cid}`);
+});
+
+// Webhook: status callback (para rastrear resultados)
+app.post('/sw/status', (req, res) => {
+  const callSid = req.body.CallSid;
+  const callStatus = req.body.CallStatus;
+  const callData = callDataMap.get(callSid);
+
+  if (callData) {
+    const { campaignId, index } = callData;
+    console.log(`📩 Status: ${callStatus} | ${callData.clientData?.nombre || 'N/A'}`);
+
+    if (['busy', 'no-answer', 'failed', 'canceled'].includes(callStatus)) {
+      const statusMap = {
+        'busy': 'ocupado',
+        'no-answer': 'no_contesto',
+        'failed': 'fallida',
+        'canceled': 'cancelada'
+      };
+      // Solo loguear si no hay resultado previo para esta llamada
+      const campaign = campaigns.get(campaignId);
+      const yaRegistrado = campaign?.results?.find(r => r.index == index && !['error'].includes(r.resultado));
+      if (!yaRegistrado) {
+        logResult(campaignId, index, statusMap[callStatus] || callStatus, `Causa: ${callStatus}`);
+      }
+    }
+
+    if (['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(callStatus)) {
+      callDataMap.delete(callSid);
+    }
+  }
+
+  res.sendStatus(200);
+});
+
+function escapeXml(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+// ============================================================
+// LOGGING Y GAS
+// ============================================================
+function logResult(campaignId, index, resultado, detalle) {
+  const camp = campaigns.get(campaignId);
+  if (!camp) return;
+  const cl = camp.clients?.[index] || {};
   const entry = {
-    campaignId: campId, index: idx,
     fecha: new Date().toISOString(),
     nombre: cl.nombre || '', telefono: cl.telefono || '',
     saldo: cl.saldo || 0, diasAtraso: cl.diasAtraso || 0,
     promotor: cl.promotor || '', resultado, detalle,
-    cobrador: camp.cobrador
+    gestor: camp.cobrador, campaignId, index
   };
   camp.results.push(entry);
   console.log(`📋 ${entry.nombre}: ${resultado} - ${detalle}`);
@@ -460,47 +379,71 @@ async function sendToGAS(entry) {
 }
 
 // ============================================================
-// HACER LLAMADA (con formato de teléfono + horario)
+// HACER LLAMADA VIA SIGNALWIRE
 // ============================================================
-function isHorarioPermitido() {
-  const now = new Date();
-  const mx = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
-  const hora = mx.getHours();
-  const dia = mx.getDay(); // 0=domingo
-  // No llamar domingos, ni antes de 8am, ni después de 8pm
-  if (dia === 0) return false;
-  if (hora < 8 || hora >= 20) return false;
-  return true;
-}
-
-function getNivelCobranza(dias) {
-  if (dias <= 15) return 'NIVEL 1 - Recordatorio';
-  if (dias <= 30) return 'NIVEL 2 - Urgente';
-  if (dias <= 60) return 'NIVEL 3 - Presión';
-  return 'NIVEL 4 - Legal';
-}
-
 async function makeCall(clientData, campaignId, index) {
   if (!isHorarioPermitido()) {
     throw new Error('Fuera de horario permitido (Lun-Sáb 8am-8pm)');
   }
-  
+
   let phone = String(clientData.telefono).replace(/[^0-9]/g, '');
   if (phone.length === 10) phone = '52' + phone;
   if (!phone.startsWith('+')) phone = '+' + phone;
   if (phone.length < 12) throw new Error(`Tel inválido: ${clientData.telefono}`);
-  
+
   const nivel = getNivelCobranza(Number(clientData.diasAtraso) || 0);
   console.log(`📞 ${clientData.nombre} | ${nivel} | ${clientData.diasAtraso} días | $${clientData.saldo}`);
 
-  return telnyxCall(phone, campaignId, index);
+  // SignalWire Compatibility API - Create Call
+  // Usar número mexicano verificado como CallerID
+  const callerIdNumber = process.env.SW_CALLER_ID || SW_FROM_NUMBER;
+  const swUrl = `https://${SW_SPACE_URL}/api/laml/2010-04-01/Accounts/${SW_PROJECT_ID}/Calls.json`;
+  const authHeader = 'Basic ' + Buffer.from(`${SW_PROJECT_ID}:${SW_API_TOKEN}`).toString('base64');
+
+  const body = new URLSearchParams({
+    To: phone,
+    From: callerIdNumber,
+    Url: `${SERVER_URL}/sw/voice`,
+    StatusCallback: `${SERVER_URL}/sw/status`,
+    StatusCallbackEvent: 'initiated ringing answered completed',
+    Timeout: '30'
+  });
+
+  const response = await fetch(swUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': authHeader,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: body.toString()
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SignalWire error ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const callSid = data.sid;
+
+  // Guardar datos de la llamada para cuando contesten
+  callDataMap.set(callSid, { campaignId, index, clientData });
+  
+  console.log(`📞 Llamando: campaña=${campaignId} index=${index} callSid=${callSid}`);
+  return { data };
 }
 
 // ============================================================
-// COLA DE LLAMADAS
+// COLA DE LLAMADAS CON REINTENTOS
 // ============================================================
+const RETRY_DELAY_MS = 2 * 60 * 60 * 1000; // 2 horas
+const MAX_RETRIES = 3;
+const RETRY_RESULTS = ['no_contesto', 'ocupado', 'sin_respuesta', 'timeout', 'fallida'];
+
 async function processQueue(campId) {
   const c = campaigns.get(campId);
+  
+  console.log(`🚀 Campaña ${campId}: Ronda 1 - ${c.clients.length} clientes`);
   for (let i = 0; i < c.clients.length && c.status !== 'cancelled'; i++) {
     try {
       await makeCall(c.clients[i], campId, i);
@@ -509,21 +452,78 @@ async function processQueue(campId) {
       logResult(campId, i, 'error', e.message);
     }
     c.completed++;
-
-    // Esperar entre llamadas (evitar saturar)
     if (i < c.clients.length - 1) {
-      await new Promise(r => setTimeout(r, 4000));
+      await new Promise(r => setTimeout(r, 8000)); // 8 seg entre llamadas
     }
   }
+  
+  console.log(`✅ Campaña ${campId}: Ronda 1 completada ${c.completed}/${c.total}`);
+  
+  for (let retry = 1; retry <= MAX_RETRIES && c.status !== 'cancelled'; retry++) {
+    const pendientes = [];
+    for (let i = 0; i < c.clients.length; i++) {
+      const resultados = c.results.filter(r => r.index == i);
+      if (resultados.length === 0) continue;
+      const ultimo = resultados[resultados.length - 1];
+      if (RETRY_RESULTS.includes(ultimo.resultado)) {
+        pendientes.push(i);
+      }
+    }
+    
+    if (pendientes.length === 0) {
+      console.log(`✅ Campaña ${campId}: Sin pendientes para reintento ${retry}`);
+      break;
+    }
+    
+    const esperaMin = Math.round(RETRY_DELAY_MS / 60000);
+    console.log(`⏳ Campaña ${campId}: Reintento ${retry}/${MAX_RETRIES} en ${esperaMin} min para ${pendientes.length} clientes`);
+    
+    c.status = `esperando_reintento_${retry}`;
+    c.nextRetry = new Date(Date.now() + RETRY_DELAY_MS).toISOString();
+    c.retryPendientes = pendientes.length;
+    c.retryNumero = retry;
+    
+    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    
+    if (c.status === 'cancelled') break;
+    if (!isHorarioPermitido()) {
+      console.log(`⏰ Campaña ${campId}: Fuera de horario, cancelando reintentos`);
+      break;
+    }
+    
+    c.status = `reintento_${retry}`;
+    console.log(`🔄 Campaña ${campId}: Ronda ${retry + 1} - ${pendientes.length} reintentos`);
+    
+    for (let j = 0; j < pendientes.length && c.status !== 'cancelled'; j++) {
+      const idx = pendientes[j];
+      try {
+        await makeCall(c.clients[idx], campId, idx);
+      } catch (e) {
+        console.error(`Error reintento ${c.clients[idx].nombre}:`, e.message);
+        logResult(campId, idx, 'error', `Reintento ${retry}: ${e.message}`);
+      }
+      if (j < pendientes.length - 1) {
+        await new Promise(r => setTimeout(r, 8000));
+      }
+    }
+    
+    console.log(`✅ Campaña ${campId}: Reintento ${retry} completado`);
+  }
+  
   if (c.status !== 'cancelled') c.status = 'completed';
-  console.log(`✅ Campaña ${campId}: ${c.completed}/${c.total}`);
+  c.nextRetry = null;
+  c.retryPendientes = 0;
+  
+  const promesas = c.results.filter(r => r.resultado === 'promesa_pago').length;
+  const pagos = c.results.filter(r => r.resultado === 'ya_pago').length;
+  const transfers = c.results.filter(r => r.resultado === 'transferencia').length;
+  console.log(`🏁 Campaña ${campId} FINALIZADA | Promesas: ${promesas} | Ya pagó: ${pagos} | Transferencias: ${transfers}`);
 }
 
 // ============================================================
 // API ENDPOINTS
 // ============================================================
 
-// Iniciar campaña
 app.post('/api/campaign/start', auth, async (req, res) => {
   const { clients, cobrador, campaignName } = req.body;
   if (!clients?.length) return res.status(400).json({ error: 'Sin clientes' });
@@ -540,7 +540,6 @@ app.post('/api/campaign/start', auth, async (req, res) => {
   res.json({ success: true, campaignId: id, total: clients.length });
 });
 
-// Status
 app.get('/api/campaign/:id', auth, (req, res) => {
   const c = campaigns.get(req.params.id);
   if (!c) return res.status(404).json({ error: 'No encontrada' });
@@ -548,7 +547,6 @@ app.get('/api/campaign/:id', auth, (req, res) => {
   res.json(safe);
 });
 
-// Cancelar
 app.post('/api/campaign/:id/cancel', auth, (req, res) => {
   const c = campaigns.get(req.params.id);
   if (!c) return res.status(404).json({ error: 'No encontrada' });
@@ -556,7 +554,6 @@ app.post('/api/campaign/:id/cancel', auth, (req, res) => {
   res.json({ success: true });
 });
 
-// Llamada de prueba
 app.post('/api/call/test', auth, async (req, res) => {
   const cd = req.body;
   const id = `test_${Date.now()}`;
@@ -573,7 +570,6 @@ app.post('/api/call/test', auth, async (req, res) => {
   }
 });
 
-// Preview audio
 app.post('/api/audio/preview', auth, async (req, res) => {
   try {
     const h = crypto.createHash('md5').update(req.body.text).digest('hex');
@@ -584,23 +580,21 @@ app.post('/api/audio/preview', auth, async (req, res) => {
   }
 });
 
-// Config
 app.get('/api/config', auth, (req, res) => {
   res.json({
-    provider: 'telnyx',
+    provider: 'signalwire',
     serverUrl: SERVER_URL,
     hasGAS: !!GAS_WEBHOOK_URL,
-    fromNumber: TELNYX_FROM_NUMBER,
-    connectionId: TELNYX_CONNECTION_ID ? '***configured***' : 'NOT SET'
+    fromNumber: SW_FROM_NUMBER,
+    spaceUrl: SW_SPACE_URL || 'NOT SET'
   });
 });
 
-// Health
 app.get('/health', (req, res) => {
   res.json({
-    status: 'ok', provider: 'telnyx',
+    status: 'ok', provider: 'signalwire',
     uptime: Math.floor(process.uptime()),
-    activeCalls: activeCalls.size,
+    activeCalls: callDataMap.size,
     campaigns: campaigns.size,
     timestamp: new Date().toISOString()
   });
@@ -611,7 +605,7 @@ app.get('/', (req, res) => {
   if (fs.existsSync(panelPath)) {
     res.sendFile(panelPath);
   } else {
-    res.json({ service: 'LeGaXi IVR Propio', status: 'running', provider: 'telnyx' });
+    res.json({ service: 'LeGaXi IVR Propio', status: 'running', provider: 'signalwire' });
   }
 });
 
@@ -619,8 +613,9 @@ app.get('/', (req, res) => {
 // START
 // ============================================================
 app.listen(PORT, () => {
-  console.log(`🚀 LeGaXi IVR PROPIO | Puerto ${PORT} | Telnyx Call Control`);
-  console.log(`📞 From: ${TELNYX_FROM_NUMBER || 'NO CONFIGURADO'}`);
+  console.log(`🚀 LeGaXi IVR PROPIO | Puerto ${PORT} | SignalWire`);
+  console.log(`📞 From: ${SW_FROM_NUMBER || 'NO CONFIGURADO'}`);
   console.log(`🌐 Server: ${SERVER_URL || 'NO CONFIGURADO'}`);
+  console.log(`🏢 Space: ${SW_SPACE_URL || 'NO CONFIGURADO'}`);
   console.log(`📊 GAS: ${GAS_WEBHOOK_URL ? 'OK' : 'NO CONFIGURADO'}`);
 });
