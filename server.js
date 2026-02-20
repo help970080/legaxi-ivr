@@ -382,7 +382,8 @@ async function sendToGAS(entry) {
 // HACER LLAMADA VIA SIGNALWIRE
 // ============================================================
 async function makeCall(clientData, campaignId, index) {
-  if (!isHorarioPermitido()) {
+  // Permitir bypass de horario para pruebas
+  if (!clientData._skipHorario && !isHorarioPermitido()) {
     throw new Error('Fuera de horario permitido (Lun-Sáb 8am-8pm)');
   }
 
@@ -405,7 +406,7 @@ async function makeCall(clientData, campaignId, index) {
     From: callerIdNumber,
     Url: `${SERVER_URL}/sw/voice`,
     StatusCallback: `${SERVER_URL}/sw/status`,
-    StatusCallbackEvent: 'initiated ringing answered completed',
+    StatusCallbackEvent: 'completed',
     Timeout: '30'
   });
 
