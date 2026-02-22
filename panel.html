@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeGaXi IVR - Panel de Control</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1e293b,#334155);padding:20px 30px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #f59e0b}
+.header h1{font-size:1.5rem;color:#f59e0b}
+.header .status{display:flex;gap:12px;align-items:center}
+.badge{padding:4px 12px;border-radius:12px;font-size:.75rem;font-weight:600}
+.badge.ok{background:#16a34a;color:#fff}
+.badge.off{background:#dc2626;color:#fff}
+.container{max-width:1100px;margin:20px auto;padding:0 20px}
+.card{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px;border:1px solid #334155}
+.card h2{color:#f59e0b;margin-bottom:15px;font-size:1.1rem}
+.row{display:flex;gap:20px;flex-wrap:wrap}
+.col{flex:1;min-width:280px}
+label{display:block;margin-bottom:4px;font-size:.85rem;color:#94a3b8}
+input,textarea,select{width:100%;padding:10px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:.9rem;margin-bottom:12px}
+textarea{height:100px;resize:vertical}
+button{padding:10px 24px;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:.9rem;transition:.2s}
+.btn-primary{background:#f59e0b;color:#0f172a}
+.btn-primary:hover{background:#d97706}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-danger:hover{background:#b91c1c}
+.btn-success{background:#16a34a;color:#fff}
+.btn-success:hover{background:#15803d}
+.btn-sm{padding:8px 16px;font-size:.8rem}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:20px}
+.stat{background:#0f172a;border-radius:10px;padding:15px;text-align:center;border:1px solid #334155}
+.stat .num{font-size:1.8rem;font-weight:700;color:#f59e0b}
+.stat .lbl{font-size:.75rem;color:#94a3b8;margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;padding:10px;background:#334155;color:#f59e0b}
+td{padding:8px 10px;border-bottom:1px solid #1e293b}
+.res-promesa{color:#16a34a;font-weight:600}
+.res-transfer{color:#3b82f6;font-weight:600}
+.res-pago{color:#a855f7;font-weight:600}
+.res-error{color:#dc2626}
+.res-pending{color:#94a3b8}
+.toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:8px;color:#fff;font-weight:600;z-index:999;animation:slideIn .3s}
+.toast.success{background:#16a34a}
+.toast.error{background:#dc2626}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.test-section{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
+.test-section input{margin-bottom:0;width:200px}
+.progress-bar{height:8px;background:#334155;border-radius:4px;overflow:hidden;margin:10px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,#f59e0b,#16a34a);transition:width .5s}
+#clientList{max-height:400px;overflow-y:auto}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📞 LeGaXi IVR - Sinch</h1>
+  <div class="status">
+    <span id="configBadge" class="badge off">Verificando...</span>
+    <span id="sinchBadge" class="badge off">Sinch: --</span>
+  </div>
+</div>
+
+<div class="container">
+  <!-- STATS -->
+  <div class="stats" id="statsRow">
+    <div class="stat"><div class="num" id="sTotal">0</div><div class="lbl">Total</div></div>
+    <div class="stat"><div class="num" id="sCompleted">0</div><div class="lbl">Completadas</div></div>
+    <div class="stat"><div class="num" id="sPromesas">0</div><div class="lbl">Promesas</div></div>
+    <div class="stat"><div class="num" id="sPagos">0</div><div class="lbl">Ya Pagaron</div></div>
+    <div class="stat"><div class="num" id="sTransfer">0</div><div class="lbl">Transferencia</div></div>
+  </div>
+
+  <!-- TEST CALL -->
+  <div class="card">
+    <h2>🧪 Llamada de Prueba</h2>
+    <div class="test-section">
+      <div><label>Teléfono (10 dígitos)</label><input id="testPhone" placeholder="5544621100"></div>
+      <div><label>Nombre</label><input id="testName" placeholder="Prueba" value="Prueba"></div>
+      <button class="btn-primary btn-sm" onclick="testCall()">📞 Llamar con IVR</button>
+      <button class="btn-success btn-sm" onclick="testTTS()">🔊 Solo TTS</button>
+    </div>
+  </div>
+
+  <!-- CAMPAIGN -->
+  <div class="card">
+    <h2>🚀 Campaña de Llamadas</h2>
+    <div class="row">
+      <div class="col">
+        <label>Clientes (JSON)</label>
+        <textarea id="clientsInput" placeholder='[{"nombre":"Juan Pérez","telefono":"5512345678","saldo":"1500","diasAtraso":"30","promotor":"Carlos"}]'></textarea>
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button class="btn-sm btn-primary" onclick="loadSample()">📋 Ejemplo</button>
+          <label class="btn-sm btn-success" style="display:inline-flex;align-items:center;cursor:pointer">
+            📁 CSV <input type="file" accept=".csv,.txt" style="display:none" onchange="loadCSV(this)">
+          </label>
+        </div>
+      </div>
+      <div class="col">
+        <label>Mensaje personalizado (opcional)</label>
+        <textarea id="msgInput" placeholder="Usa {nombre}, {saldo}, {dias}. Dejar vacío para mensaje default."></textarea>
+        <label>Delay entre llamadas (seg)</label>
+        <input type="number" id="delayInput" value="15" min="5" max="120">
+      </div>
+    </div>
+    <div style="margin-top:15px;display:flex;gap:10px">
+      <button class="btn-primary" onclick="startCampaign()">🚀 Iniciar Campaña</button>
+      <button class="btn-danger" onclick="cancelCampaign()">⛔ Cancelar</button>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progressBar" style="width:0%"></div></div>
+  </div>
+
+  <!-- RESULTS TABLE -->
+  <div class="card">
+    <h2>📊 Resultados</h2>
+    <div id="clientList">
+      <table>
+        <thead><tr><th>#</th><th>Nombre</th><th>Teléfono</th><th>Saldo</th><th>Resultado</th></tr></thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let currentCampaignId = null;
+let pollInterval = null;
+
+// CONFIG CHECK
+async function checkConfig(){
+  try{
+    const r=await fetch(API+'/api/config');
+    const d=await r.json();
+    document.getElementById('configBadge').textContent=d.provider==='sinch'?'✅ Conectado':'❌';
+    document.getElementById('configBadge').className='badge '+(d.sinch?.configured?'ok':'off');
+    document.getElementById('sinchBadge').textContent='Sinch: '+(d.sinch?.number||'--');
+    document.getElementById('sinchBadge').className='badge '+(d.sinch?.configured?'ok':'off');
+  }catch(e){
+    document.getElementById('configBadge').textContent='❌ Sin conexión';
+    document.getElementById('configBadge').className='badge off';
+  }
+}
+
+// TEST CALL
+async function testCall(){
+  const phone=document.getElementById('testPhone').value.trim();
+  const nombre=document.getElementById('testName').value.trim()||'Prueba';
+  if(!phone){toast('Ingresa un teléfono','error');return}
+  try{
+    const r=await fetch(API+'/api/test-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,nombre})});
+    const d=await r.json();
+    toast(d.success?'✅ Llamada enviada':'❌ '+JSON.stringify(d.error),d.success?'success':'error');
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+
+async function testTTS(){
+  const phone=document.getElementById('testPhone').value.trim();
+  if(!phone){toast('Ingresa un teléfono','error');return}
+  try{
+    const r=await fetch(API+'/api/test-tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,text:'Hola, esta es una prueba del sistema LeGaXi. Gracias.'})});
+    const d=await r.json();
+    toast(d.success?'✅ TTS enviada':'❌ '+JSON.stringify(d.error),d.success?'success':'error');
+  }catch(e){toast('Error: '+e.message,'error')}
+}
+
+// CAMPAIGN
+async function startCampaign(){
+  try{
+    const clients=JSON.parse(document.getElementById('clientsInput').value);
+    const message=document.getElementById('msgInput').value.trim()||undefined;
+    const delaySeconds=parseInt(document.getElementById('delayInput').value)||15;
+    const r=await fetch(API+'/api/campaign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clients,message,delaySeconds})});
+    const d=await r.json();
+    if(d.error){toast('❌ '+d.error,'error');return}
+    currentCampaignId=d.campaignId;
+    toast('🚀 Campaña '+d.campaignId+' iniciada ('+d.total+' clientes)','success');
+    startPolling();
+  }catch(e){toast('Error JSON: '+e.message,'error')}
+}
+
+async function cancelCampaign(){
+  if(!currentCampaignId)return;
+  try{
+    await fetch(API+'/api/campaign/'+currentCampaignId+'/cancel',{method:'POST'});
+    toast('⛔ Campaña cancelada','error');
+  }catch(e){}
+}
+
+function startPolling(){
+  if(pollInterval)clearInterval(pollInterval);
+  pollInterval=setInterval(async()=>{
+    if(!currentCampaignId)return;
+    try{
+      const r=await fetch(API+'/api/campaign/'+currentCampaignId);
+      const d=await r.json();
+      updateStats(d);
+      updateTable(d.clients||[]);
+      const pct=d.total?Math.round((d.completed/d.total)*100):0;
+      document.getElementById('progressBar').style.width=pct+'%';
+      if(d.completed>=d.total){clearInterval(pollInterval);toast('✅ Campaña completada','success')}
+    }catch(e){}
+  },3000);
+}
+
+function updateStats(d){
+  const cls=d.clients||[];
+  document.getElementById('sTotal').textContent=d.total||0;
+  document.getElementById('sCompleted').textContent=d.completed||0;
+  document.getElementById('sPromesas').textContent=cls.filter(c=>c.resultado==='promesa_pago').length;
+  document.getElementById('sPagos').textContent=cls.filter(c=>c.resultado==='ya_pago').length;
+  document.getElementById('sTransfer').textContent=cls.filter(c=>c.resultado==='transferencia').length;
+}
+
+function updateTable(cls){
+  const tb=document.getElementById('resultsBody');
+  tb.innerHTML=cls.map((c,i)=>{
+    const rc=c.resultado==='promesa_pago'?'res-promesa':c.resultado==='transferencia'?'res-transfer':c.resultado==='ya_pago'?'res-pago':c.resultado==='pendiente'?'res-pending':'res-error';
+    return `<tr><td>${i+1}</td><td>${c.nombre}</td><td>${c.telefono}</td><td>$${c.saldo||'-'}</td><td class="${rc}">${c.resultado}</td></tr>`;
+  }).join('');
+}
+
+function loadSample(){
+  document.getElementById('clientsInput').value=JSON.stringify([
+    {"nombre":"Juan Pérez López","telefono":"5544621100","saldo":"2500","diasAtraso":"15","promotor":"Carlos"},
+    {"nombre":"María García","telefono":"5512345678","saldo":"1800","diasAtraso":"30","promotor":"Carlos"}
+  ],null,2);
+}
+
+function loadCSV(input){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const lines=e.target.result.split('\n').filter(l=>l.trim());
+    if(lines.length<2){toast('CSV vacío','error');return}
+    const headers=lines[0].split(',').map(h=>h.trim().toLowerCase());
+    const clients=[];
+    for(let i=1;i<lines.length;i++){
+      const vals=lines[i].split(',').map(v=>v.trim());
+      const obj={};
+      headers.forEach((h,j)=>{
+        if(h.includes('nombre'))obj.nombre=vals[j];
+        else if(h.includes('tel'))obj.telefono=vals[j];
+        else if(h.includes('saldo'))obj.saldo=vals[j];
+        else if(h.includes('dias')||h.includes('atraso'))obj.diasAtraso=vals[j];
+        else if(h.includes('promotor'))obj.promotor=vals[j];
+      });
+      if(obj.nombre&&obj.telefono)clients.push(obj);
+    }
+    document.getElementById('clientsInput').value=JSON.stringify(clients,null,2);
+    toast('📁 '+clients.length+' clientes cargados','success');
+  };
+  reader.readAsText(file);
+}
+
+function toast(msg,type){
+  const t=document.createElement('div');t.className='toast '+type;t.textContent=msg;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),4000);
+}
+
+checkConfig();
+</script>
+</body>
+</html>

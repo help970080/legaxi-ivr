@@ -1,0 +1,12 @@
+{
+  "name": "legaxi-ivr",
+  "version": "4.0.0",
+  "description": "LeGaXi IVR - Sinch Voice API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
