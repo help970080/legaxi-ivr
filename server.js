@@ -111,7 +111,7 @@ async function sinchCallWithIVR(phone, texto, campaignId, index, clientData) {
           if (parsed.callId) {
             callData.set(parsed.callId, { campaignId, index, ...clientData });
           }
-          console.log(`📞 Sinch call → ${phone}: callId=${parsed.callId || 'error'}`);
+          console.log(`📞 Sinch call → ${phone}: callId=${parsed.callId || 'ERROR'} | FULL RESPONSE: ${JSON.stringify(parsed)}`);
           resolve(parsed);
         } catch (e) {
           console.error('Sinch response parse error:', data);
@@ -119,7 +119,8 @@ async function sinchCallWithIVR(phone, texto, campaignId, index, clientData) {
         }
       });
     });
-    req.on('error', reject);
+    req.on('error', (e) => { console.error('Sinch request error:', e.message); reject(e); });
+    console.log(`📤 Sinch CustomCallout REQUEST to ${phone}: ${body.substring(0, 300)}...`);
     req.write(body);
     req.end();
   });
@@ -154,11 +155,13 @@ async function sinchCallTTS(phone, texto) {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
+        console.log(`📞 Sinch TTS → ${phone}: HTTP ${res.statusCode} | RESPONSE: ${data}`);
         try { resolve(JSON.parse(data)); }
         catch (e) { resolve({ error: data }); }
       });
     });
-    req.on('error', reject);
+    req.on('error', (e) => { console.error('Sinch TTS error:', e.message); reject(e); });
+    console.log(`📤 Sinch TTS REQUEST: ${body}`);
     req.write(body);
     req.end();
   });
