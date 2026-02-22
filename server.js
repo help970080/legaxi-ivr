@@ -63,8 +63,7 @@ async function sinchCallWithIVR(phone, texto, campaignId, index, clientData) {
         action: {
           name: 'connectPstn',
           number: phone,
-          cli: SINCH_FROM_NUMBER.replace('+', ''),
-          locale: 'es-MX'
+          cli: SINCH_FROM_NUMBER,
         }
       }),
       // ACE: Answered Call Event - reproducir menú IVR
@@ -133,11 +132,13 @@ async function sinchCallTTS(phone, texto) {
   const body = JSON.stringify({
     method: 'ttsCallout',
     ttsCallout: {
-      cli: SINCH_FROM_NUMBER.replace('+', ''),
+      cli: SINCH_FROM_NUMBER,
       destination: { type: 'number', endpoint: phone },
       domain: 'pstn',
       locale: 'es-MX',
-      text: texto
+      text: texto,
+      enableAce: true,
+      enableDice: true
     }
   });
 
@@ -201,7 +202,7 @@ app.post('/sinch', (req, res) => {
     } else if (value === 'transferencia') {
       svaml = {
         instructions: [{ name: 'say', text: 'Conectándole con su asesor.', locale: 'es-MX' }],
-        action: { name: 'connectPstn', number: cobPhone.replace('+', ''), cli: SINCH_FROM_NUMBER.replace('+', '') }
+        action: { name: 'connectPstn', number: cobPhone, cli: SINCH_FROM_NUMBER }
       };
     } else if (value === 'ya_pago') {
       svaml = {
