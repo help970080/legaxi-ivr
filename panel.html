@@ -36,9 +36,10 @@ button{padding:10px 24px;border:none;border-radius:8px;font-weight:600;cursor:po
 table{width:100%;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;padding:10px;background:#334155;color:#f59e0b}
 td{padding:8px 10px;border-bottom:1px solid #1e293b}
-.res-promesa{color:#16a34a;font-weight:600}
-.res-transfer{color:#3b82f6;font-weight:600}
+.res-convenio{color:#16a34a;font-weight:600}
+.res-asesor{color:#3b82f6;font-weight:600}
 .res-pago{color:#a855f7;font-weight:600}
+.res-colgar{color:#f59e0b;font-weight:600}
 .res-error{color:#dc2626}
 .res-pending{color:#94a3b8}
 .toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:8px;color:#fff;font-weight:600;z-index:999;animation:slideIn .3s}
@@ -66,9 +67,9 @@ td{padding:8px 10px;border-bottom:1px solid #1e293b}
   <div class="stats" id="statsRow">
     <div class="stat"><div class="num" id="sTotal">0</div><div class="lbl">Total</div></div>
     <div class="stat"><div class="num" id="sCompleted">0</div><div class="lbl">Completadas</div></div>
-    <div class="stat"><div class="num" id="sPromesas">0</div><div class="lbl">Promesas</div></div>
+    <div class="stat"><div class="num" id="sConvenio">0</div><div class="lbl">Convenios</div></div>
+    <div class="stat"><div class="num" id="sAsesor">0</div><div class="lbl">Asesor</div></div>
     <div class="stat"><div class="num" id="sPagos">0</div><div class="lbl">Ya Pagaron</div></div>
-    <div class="stat"><div class="num" id="sTransfer">0</div><div class="lbl">Transferencia</div></div>
   </div>
 
   <!-- TEST CALL -->
@@ -207,15 +208,15 @@ function updateStats(d){
   const cls=d.clients||[];
   document.getElementById('sTotal').textContent=d.total||0;
   document.getElementById('sCompleted').textContent=d.completed||0;
-  document.getElementById('sPromesas').textContent=cls.filter(c=>c.resultado==='promesa_pago').length;
+  document.getElementById('sConvenio').textContent=cls.filter(c=>c.resultado==='convenio').length;
+  document.getElementById('sAsesor').textContent=cls.filter(c=>c.resultado==='asesor').length;
   document.getElementById('sPagos').textContent=cls.filter(c=>c.resultado==='ya_pago').length;
-  document.getElementById('sTransfer').textContent=cls.filter(c=>c.resultado==='transferencia').length;
 }
 
 function updateTable(cls){
   const tb=document.getElementById('resultsBody');
   tb.innerHTML=cls.map((c,i)=>{
-    const rc=c.resultado==='promesa_pago'?'res-promesa':c.resultado==='transferencia'?'res-transfer':c.resultado==='ya_pago'?'res-pago':c.resultado==='pendiente'?'res-pending':'res-error';
+    const rc=c.resultado==='convenio'?'res-convenio':c.resultado==='asesor'?'res-asesor':c.resultado==='ya_pago'?'res-pago':c.resultado==='colgar'?'res-colgar':c.resultado==='pendiente'?'res-pending':'res-error';
     return `<tr><td>${i+1}</td><td>${c.nombre}</td><td>${c.telefono}</td><td>$${c.saldo||'-'}</td><td class="${rc}">${c.resultado}</td></tr>`;
   }).join('');
 }
