@@ -74,11 +74,13 @@ async function sinchCallWithIVR(phone, texto, campaignId, index, clientData) {
           menus: [{
             id: 'main',
             mainPrompt: `#tts[${texto}]`,
-            timeoutMills: 10000,
+            timeoutMills: 12000,
             options: [
-              { dtmf: '1', action: 'return(promesa_pago)' },
-              { dtmf: '2', action: 'return(transferencia)' },
-              { dtmf: '3', action: 'return(ya_pago)' }
+              { dtmf: '1', action: 'return(convenio)' },
+              { dtmf: '2', action: 'return(asesor)' },
+              { dtmf: '3', action: 'return(ya_pago)' },
+              { dtmf: '4', action: 'menu(main)' },
+              { dtmf: '5', action: 'return(colgar)' }
             ]
           }]
         }
@@ -194,24 +196,29 @@ app.post('/sinch', (req, res) => {
     const cobPhone = cd?.telefonoCobrador || DEFAULT_COBRADOR_PHONE;
     let svaml;
 
-    if (value === 'promesa_pago') {
+    if (value === 'convenio') {
       svaml = {
-        instructions: [{ name: 'say', text: `Gracias ${nombre}. Registramos su promesa de pago. Un asesor le contactará pronto. Hasta luego.`, locale: 'es-MX' }],
+        instructions: [{ name: 'say', text: `${nombre}, su solicitud de convenio ha sido registrada. Un asesor se comunicará con usted en las próximas horas para formalizar el acuerdo de pago. Gracias.`, locale: 'es-MX' }],
         action: { name: 'hangup' }
       };
-    } else if (value === 'transferencia') {
+    } else if (value === 'asesor') {
       svaml = {
-        instructions: [{ name: 'say', text: 'Conectándole con su asesor.', locale: 'es-MX' }],
+        instructions: [{ name: 'say', text: 'Espere un momento, le comunicamos con un asesor.', locale: 'es-MX' }],
         action: { name: 'connectPstn', number: cobPhone, cli: SINCH_FROM_NUMBER }
       };
     } else if (value === 'ya_pago') {
       svaml = {
-        instructions: [{ name: 'say', text: `Gracias ${nombre}. Registramos su pago. Lo verificaremos. Buen día.`, locale: 'es-MX' }],
+        instructions: [{ name: 'say', text: `${nombre}, si ya realizó su pago, por favor envíe su ficha o comprobante de pago por WhatsApp al número que le proporcionará su asesor. Verificaremos su pago a la brevedad. Gracias.`, locale: 'es-MX' }],
+        action: { name: 'hangup' }
+      };
+    } else if (value === 'colgar') {
+      svaml = {
+        instructions: [{ name: 'say', text: 'Gracias por atender nuestra llamada. Recuerde que es importante regularizar su situación. Hasta luego.', locale: 'es-MX' }],
         action: { name: 'hangup' }
       };
     } else {
       svaml = {
-        instructions: [{ name: 'say', text: 'No recibimos respuesta. Le contactaremos pronto. Hasta luego.', locale: 'es-MX' }],
+        instructions: [{ name: 'say', text: 'No recibimos respuesta. Le contactaremos nuevamente. Hasta luego.', locale: 'es-MX' }],
         action: { name: 'hangup' }
       };
     }
@@ -310,7 +317,7 @@ app.post('/api/campaign', auth, async (req, res) => {
         const dias = cl.diasAtraso || '0';
         const texto = message
           ? message.replace(/{nombre}/g, nombre).replace(/{saldo}/g, saldo).replace(/{dias}/g, dias)
-          : `${nombre}, le llamamos de LeGaXi Asociados. Su cuenta tiene un saldo vencido de ${saldo} pesos con ${dias} días de atraso. Presione 1 para agendar promesa de pago. Presione 2 para hablar con su asesor. Presione 3 si ya realizó su pago.`;
+          : `${nombre}, le llamamos de LeGaXi, despacho de cobranza, por un pagaré vencido con LMV CREDIA SA DE CV por ${saldo} pesos con ${dias} días de atraso. Es urgente que se comunique. Presione 1 para hacer un convenio de pago. Presione 2 para ser atendido por un asesor. Presione 3 si ya realizó su pago y enviar su ficha. Presione 4 para repetir este mensaje. Presione 5 para colgar.`;
 
         let phone = (cl.telefono || '').replace(/\D/g, '');
         if (phone.length === 10) phone = '52' + phone;
@@ -361,7 +368,7 @@ app.post('/api/test-call', auth, async (req, res) => {
     if (p.length === 10) p = '52' + p;
     if (!p.startsWith('+')) p = '+' + p;
 
-    const texto = `Hola ${nombre}, esta es una prueba del sistema IVR de LeGaXi. Presione 1 para confirmar. Presione 2 para hablar con un asesor.`;
+    const texto = `${nombre}, le llamamos de LeGaXi, despacho de cobranza, por un pagaré vencido con LMV CREDIA SA DE CV. Es urgente que se comunique. Presione 1 para hacer un convenio. Presione 2 para hablar con un asesor. Presione 3 si ya pagó. Presione 4 para repetir. Presione 5 para colgar.`;
     const result = await sinchCallWithIVR(p, texto, 'test', 0, { nombre });
     res.json({ success: !result.error, result });
   } catch (err) {
