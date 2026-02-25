@@ -1,6 +1,6 @@
 // ============================================================
-// LeGaXi IVR v4.0 - SINCH Voice API
-// Llamadas automáticas con IVR (Presione 1, 2, 3)
+// LeGaXi IVR v5.0 - ZADARMA API
+// Llamadas automáticas con IVR de centralita
 // Deploy: Render.com (Docker)
 // ============================================================
 const express = require('express');
@@ -15,18 +15,16 @@ app.use(express.urlencoded({ extended: true }));
 
 // ---- CONFIG ----
 const {
-  SINCH_APP_KEY = '5981949f-a13f-45c5-aa5d-be5e7dbcc063',
-  SINCH_APP_SECRET = 'tJaOJlbUlU6DEZFpUQ3DgQ==',
-  SINCH_FROM_NUMBER = '+447418631394',
-  SINCH_API_URL = 'https://calling.api.sinch.com/calling/v1',
+  ZADARMA_API_KEY = '',
+  ZADARMA_API_SECRET = '',
+  ZADARMA_SIP = '681294',
+  ZADARMA_CALLER_ID = '+525598160911',
+  WHATSAPP_NUMBER = '5544621100',
   GAS_WEBHOOK_URL,
   SERVER_URL = 'https://legaxi-ivr.onrender.com',
   API_KEY,
-  DEFAULT_COBRADOR_PHONE = '+525544621100',
   PORT = 3000
 } = process.env;
-
-const AUTH = 'Basic ' + Buffer.from(`${SINCH_APP_KEY}:${SINCH_APP_SECRET}`).toString('base64');
 
 // ---- CORS ----
 app.use((req, res, next) => {
@@ -44,238 +42,151 @@ function auth(req, res, next) {
   next();
 }
 
-// ---- CAMPAIGNS ----
-const campaigns = new Map();
-const callData = new Map(); // callId → { campaignId, index, clientData }
-
-// ============================================================
-// SINCH: Hacer llamada con CustomCallout (IVR completo)
-// ============================================================
-async function sinchCallWithIVR(phone, texto, campaignId, index, clientData) {
-  const callbackUrl = `${SERVER_URL}/sinch`;
-
-  // CustomCallout con ICE (conectar), ACE (menú IVR), PIE/DICE (resultados)
-  const body = JSON.stringify({
-    method: 'customCallout',
-    customCallout: {
-      // ICE: Incoming Call Event - conectar la llamada
-      ice: JSON.stringify({
-        action: {
-          name: 'connectPstn',
-          number: phone,
-          cli: SINCH_FROM_NUMBER,
-        }
-      }),
-      // ACE: Answered Call Event - reproducir menú IVR
-      ace: JSON.stringify({
-        action: {
-          name: 'runMenu',
-          locale: 'es-MX',
-          menus: [{
-            id: 'main',
-            mainPrompt: `#tts[${texto}]`,
-            timeoutMills: 12000,
-            options: [
-              { dtmf: '1', action: 'return(convenio)' },
-              { dtmf: '2', action: 'return(asesor)' },
-              { dtmf: '3', action: 'return(ya_pago)' },
-              { dtmf: '4', action: 'menu(main)' },
-              { dtmf: '5', action: 'return(colgar)' }
-            ]
-          }]
-        }
-      }),
-      // PIE: Prompt Input Event - resultado del menú
-      pie: callbackUrl,
-      // DICE: Disconnect Call Event
-      dice: callbackUrl
-    }
-  });
-
+// ---- ZADARMA API ----
+function zadarmaRequest(method, params = {}) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`${SINCH_API_URL}/callouts`);
+    const sortedKeys = Object.keys(params).sort();
+    const paramsStr = sortedKeys.map(k => `${k}=${params[k]}`).join('&');
+    const md5 = crypto.createHash('md5').update(paramsStr || '').digest('hex');
+    const signStr = method + paramsStr + md5;
+    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signStr).digest('base64');
+    const url = `https://api.zadarma.com${method}${paramsStr ? '?' + paramsStr : ''}`;
+    const urlObj = new URL(url);
+
     const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': AUTH
-      }
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: 'GET',
+      headers: { 'Authorization': `${ZADARMA_API_KEY}:${signature}` }
     }, (res) => {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          // Guardar datos de la llamada para cuando llegue el callback
-          if (parsed.callId) {
-            callData.set(parsed.callId, { campaignId, index, ...clientData });
-          }
-          console.log(`📞 Sinch call → ${phone}: callId=${parsed.callId || 'ERROR'} | FULL RESPONSE: ${JSON.stringify(parsed)}`);
-          resolve(parsed);
-        } catch (e) {
-          console.error('Sinch response parse error:', data);
-          resolve({ error: data });
-        }
-      });
-    });
-    req.on('error', (e) => { console.error('Sinch request error:', e.message); reject(e); });
-    console.log(`📤 Sinch CustomCallout REQUEST to ${phone}: ${body.substring(0, 300)}...`);
-    req.write(body);
-    req.end();
-  });
-}
-
-// ============================================================
-// SINCH: Llamada simple TTS (sin IVR, solo mensaje)
-// ============================================================
-async function sinchCallTTS(phone, texto) {
-  const body = JSON.stringify({
-    method: 'ttsCallout',
-    ttsCallout: {
-      cli: SINCH_FROM_NUMBER,
-      destination: { type: 'number', endpoint: phone },
-      domain: 'pstn',
-      locale: 'es-MX',
-      text: texto,
-      enableAce: true,
-      enableDice: true
-    }
-  });
-
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${SINCH_API_URL}/callouts`);
-    const req = https.request({
-      hostname: url.hostname,
-      path: url.pathname,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': AUTH
-      }
-    }, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => {
-        console.log(`📞 Sinch TTS → ${phone}: HTTP ${res.statusCode} | RESPONSE: ${data}`);
         try { resolve(JSON.parse(data)); }
-        catch (e) { resolve({ error: data }); }
+        catch (e) { resolve({ status: 'error', raw: data }); }
       });
     });
-    req.on('error', (e) => { console.error('Sinch TTS error:', e.message); reject(e); });
-    console.log(`📤 Sinch TTS REQUEST: ${body}`);
-    req.write(body);
+    req.on('error', reject);
     req.end();
   });
 }
 
+// ---- CAMPAIGNS & CALLS ----
+const campaigns = new Map();
+const activeCalls = new Map();
+
 // ============================================================
-// SINCH CALLBACKS - PIE (resultado menú) y DICE (desconexión)
+// HACER LLAMADA - callback predicted (deudor escucha IVR)
 // ============================================================
-app.post('/sinch', (req, res) => {
+async function makeCall(phone, campaignId, index, clientData) {
+  let cleanPhone = (phone || '').replace(/\D/g, '');
+  // Quitar prefijo 52 - la centralita lo agrega
+  if (cleanPhone.startsWith('52') && cleanPhone.length === 12) cleanPhone = cleanPhone.substring(2);
+  if (cleanPhone.startsWith('+52')) cleanPhone = cleanPhone.substring(3);
+  if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
+
+  const params = {
+    from: ZADARMA_SIP,
+    predicted: 'predicted',
+    sip: ZADARMA_SIP,
+    to: cleanPhone
+  };
+
+  console.log(`📞 [${campaignId}] #${index} Llamando ${clientData.nombre} → ${cleanPhone}`);
+  const result = await zadarmaRequest('/v1/request/callback/', params);
+
+  if (result.status === 'success') {
+    activeCalls.set(`${campaignId}-${index}`, {
+      campaignId, index, phone: cleanPhone,
+      nombre: clientData.nombre, startTime: Date.now(),
+      ...clientData
+    });
+    console.log(`   ✅ Llamada enviada`);
+  } else {
+    console.log(`   ❌ Error: ${JSON.stringify(result)}`);
+    logResult(campaignId, index, null, 'error_api');
+  }
+  return result;
+}
+
+// ============================================================
+// ZADARMA WEBHOOKS
+// ============================================================
+app.post('/zadarma', (req, res) => {
   const event = req.body.event;
-  const callId = req.body.callid || req.body.callId;
+  console.log(`📨 Webhook: ${event}`, JSON.stringify(req.body).substring(0, 500));
 
-  console.log(`📨 Sinch callback: ${event} callId=${callId}`);
-
-  if (event === 'pie') {
-    // Prompt Input Event - el deudor presionó algo
-    const menuResult = req.body.menuResult;
-    const value = menuResult?.value || 'sin_respuesta';
-    const cd = callData.get(callId);
-
-    console.log(`   → Resultado: ${value} (método: ${menuResult?.inputMethod})`);
-
-    if (cd) {
-      logResult(cd.campaignId, cd.index, value);
-    }
-
-    // Responder con SVAML según la opción
-    const nombre = (cd?.nombre || 'Cliente').split(' ')[0];
-    const cobPhone = cd?.telefonoCobrador || DEFAULT_COBRADOR_PHONE;
-    let svaml;
-
-    if (value === 'convenio') {
-      svaml = {
-        instructions: [{ name: 'say', text: `${nombre}, su solicitud de convenio ha sido registrada. Un asesor se comunicará con usted en las próximas horas para formalizar el acuerdo de pago. Gracias.`, locale: 'es-MX' }],
-        action: { name: 'hangup' }
-      };
-    } else if (value === 'asesor') {
-      svaml = {
-        instructions: [{ name: 'say', text: 'Espere un momento, le comunicamos con un asesor.', locale: 'es-MX' }],
-        action: { name: 'connectPstn', number: cobPhone, cli: SINCH_FROM_NUMBER }
-      };
-    } else if (value === 'ya_pago') {
-      svaml = {
-        instructions: [{ name: 'say', text: `${nombre}, si ya realizó su pago, por favor envíe su ficha o comprobante de pago por WhatsApp al número que le proporcionará su asesor. Verificaremos su pago a la brevedad. Gracias.`, locale: 'es-MX' }],
-        action: { name: 'hangup' }
-      };
-    } else if (value === 'colgar') {
-      svaml = {
-        instructions: [{ name: 'say', text: 'Gracias por atender nuestra llamada. Recuerde que es importante regularizar su situación. Hasta luego.', locale: 'es-MX' }],
-        action: { name: 'hangup' }
-      };
-    } else {
-      svaml = {
-        instructions: [{ name: 'say', text: 'No recibimos respuesta. Le contactaremos nuevamente. Hasta luego.', locale: 'es-MX' }],
-        action: { name: 'hangup' }
-      };
-    }
-
-    return res.json(svaml);
+  if (event === 'NOTIFY_OUT_START') {
+    const dest = req.body.destination;
+    console.log(`   📱 Deudor contestó: ${dest}`);
   }
 
-  if (event === 'dice') {
-    // Disconnect - llamada terminó
-    const reason = req.body.reason;
-    const cd = callData.get(callId);
-    console.log(`   → Desconexión: ${reason}`);
+  if (event === 'NOTIFY_OUT_END') {
+    const dest = req.body.destination;
+    const duration = parseInt(req.body.duration) || 0;
+    const disposition = req.body.disposition;
+    console.log(`   📴 Fin: ${dest} ${duration}s ${disposition}`);
 
-    if (cd && !cd.logged) {
-      const statusMap = { 'MANAGERHANGUP': 'completada', 'CALLERHANGUP': 'completada', 'NOCREDITPARTNER': 'sin_credito', 'GENERALERROR': 'error', 'TIMEOUT': 'no_contesto', 'NOANSWERTIMEOUT': 'no_contesto', 'CALLEEBUSY': 'ocupado' };
-      const resultado = statusMap[reason] || reason || 'desconocido';
-      // Solo loguear si no se logueó por PIE
-      if (!cd.resultado) logResult(cd.campaignId, cd.index, null, resultado);
+    for (const [key, call] of activeCalls) {
+      if (dest && (dest.includes(call.phone) || call.phone.includes(dest))) {
+        if (!call.logged) {
+          const resultado = disposition === 'answered' && duration > 5 ? 'contactado' : 'no_contesto';
+          logResult(call.campaignId, call.index, null, resultado);
+        }
+        activeCalls.delete(key);
+        break;
+      }
     }
-
-    // Limpiar
-    callData.delete(callId);
-    return res.json({});
   }
 
-  // ICE o ACE - Sinch los maneja con el customCallout, solo confirmar
+  if (event === 'NOTIFY_IVR') {
+    const dtmf = req.body.dtmf;
+    const dest = req.body.called_did || req.body.caller_id || req.body.destination;
+    console.log(`   🔢 IVR DTMF=${dtmf} de ${dest}`);
+
+    let resultado = 'sin_respuesta';
+    if (dtmf === '1') resultado = 'pago';
+    else if (dtmf === '2') resultado = 'promesa_pago';
+    else if (dtmf === '3') resultado = 'asesor';
+
+    for (const [key, call] of activeCalls) {
+      if (dest && (dest.includes(call.phone) || call.phone.includes(dest))) {
+        logResult(call.campaignId, call.index, resultado, null);
+        break;
+      }
+    }
+  }
+
   res.json({});
 });
 
+app.get('/zadarma', (req, res) => {
+  if (req.query.zd_echo) return res.send(req.query.zd_echo);
+  res.json({ status: 'ok', webhook: 'zadarma' });
+});
+
 // ============================================================
-// LOG RESULTADO → GAS Webhook
+// LOG RESULTADO → GAS
 // ============================================================
 function logResult(campaignId, index, menuValue, callStatus) {
   const camp = campaigns.get(campaignId);
   if (!camp || index === undefined) return;
   const cl = camp.clients[index];
-  if (!cl) return;
+  if (!cl || cl.logged) return;
 
   const resultado = menuValue || callStatus || 'sin_respuesta';
   cl.resultado = resultado;
   cl.logged = true;
   camp.completed = (camp.completed || 0) + 1;
-
-  // También marcar en callData
-  for (const [k, v] of callData) {
-    if (v.campaignId === campaignId && v.index === index) v.resultado = resultado;
-  }
-
   console.log(`📊 [${campaignId}] #${index} ${cl.nombre}: ${resultado}`);
 
   if (GAS_WEBHOOK_URL) {
     const payload = JSON.stringify({
       action: 'registrarLlamadaIVR',
       nombre: cl.nombre, telefono: cl.telefono,
-      saldo: cl.saldo, diasAtraso: cl.diasAtraso,
-      promotor: cl.promotor, resultado,
-      detalle: menuValue ? `Seleccionó: ${menuValue}` : (callStatus || 'Sin respuesta'),
+      saldo: cl.saldo || '', diasAtraso: cl.diasAtraso || '',
+      promotor: cl.promotor || '', resultado,
+      detalle: menuValue ? `IVR: ${menuValue}` : (callStatus || 'Sin respuesta'),
       cobrador: cl.cobrador || '', campaignId
     });
     const url = new URL(GAS_WEBHOOK_URL);
@@ -284,55 +195,37 @@ function logResult(campaignId, index, menuValue, callStatus) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }
     });
     req.on('error', e => console.error('GAS error:', e.message));
-    req.write(payload);
-    req.end();
+    req.write(payload); req.end();
   }
 }
 
 // ============================================================
-// API: Lanzar campaña
+// API ENDPOINTS
 // ============================================================
 app.post('/api/campaign', auth, async (req, res) => {
   try {
-    const { clients, message, delaySeconds = 15 } = req.body;
+    const { clients, delaySeconds = 25 } = req.body;
     if (!clients?.length) return res.status(400).json({ error: 'No hay clientes' });
 
     const campaignId = crypto.randomUUID().slice(0, 8);
+    const cls = clients.map(c => ({ ...c, resultado: 'pendiente', logged: false }));
     campaigns.set(campaignId, {
-      clients, message, started: new Date().toISOString(),
-      completed: 0, total: clients.length
+      clients: cls, started: new Date().toISOString(),
+      completed: 0, total: cls.length, cancelled: false
     });
 
-    res.json({ campaignId, total: clients.length, status: 'iniciada' });
+    res.json({ campaignId, total: cls.length, status: 'iniciada' });
 
-    // Procesar llamadas
-    for (let idx = 0; idx < clients.length; idx++) {
-      const cl = clients[idx];
+    for (let i = 0; i < cls.length; i++) {
       const camp = campaigns.get(campaignId);
       if (!camp || camp.cancelled) break;
-
       try {
-        const nombre = (cl.nombre || 'Cliente').split(' ')[0];
-        const saldo = cl.saldo || '0';
-        const dias = cl.diasAtraso || '0';
-        const texto = message
-          ? message.replace(/{nombre}/g, nombre).replace(/{saldo}/g, saldo).replace(/{dias}/g, dias)
-          : `${nombre}, le llamamos de LeGaXi, despacho de cobranza, por un pagaré vencido con LMV CREDIA SA DE CV por ${saldo} pesos con ${dias} días de atraso. Es urgente que se comunique. Presione 1 para hacer un convenio de pago. Presione 2 para ser atendido por un asesor. Presione 3 si ya realizó su pago y enviar su ficha. Presione 4 para repetir este mensaje. Presione 5 para colgar.`;
-
-        let phone = (cl.telefono || '').replace(/\D/g, '');
-        if (phone.length === 10) phone = '52' + phone;
-        if (!phone.startsWith('+')) phone = '+' + phone;
-
-        console.log(`📱 [${campaignId}] Llamando ${idx + 1}/${clients.length}: ${cl.nombre} → ${phone}`);
-        await sinchCallWithIVR(phone, texto, campaignId, idx, cl);
+        await makeCall(cls[i].telefono, campaignId, i, cls[i]);
       } catch (err) {
-        console.error(`❌ Error llamada ${idx}:`, err.message);
-        logResult(campaignId, idx, null, 'error');
+        console.error(`❌ Error llamada ${i}:`, err.message);
+        logResult(campaignId, i, null, 'error');
       }
-
-      if (idx < clients.length - 1) {
-        await new Promise(r => setTimeout(r, (delaySeconds || 15) * 1000));
-      }
+      if (i < cls.length - 1) await new Promise(r => setTimeout(r, delaySeconds * 1000));
     }
     console.log(`✅ Campaña ${campaignId} completada`);
   } catch (err) {
@@ -341,16 +234,16 @@ app.post('/api/campaign', auth, async (req, res) => {
   }
 });
 
-// ============================================================
-// API: Estado, cancelar, test, config
-// ============================================================
 app.get('/api/campaign/:id', auth, (req, res) => {
   const camp = campaigns.get(req.params.id);
   if (!camp) return res.status(404).json({ error: 'No encontrada' });
   res.json({
     campaignId: req.params.id, total: camp.total,
     completed: camp.completed || 0, cancelled: !!camp.cancelled,
-    clients: camp.clients.map(c => ({ nombre: c.nombre, telefono: c.telefono, resultado: c.resultado || 'pendiente' }))
+    clients: camp.clients.map(c => ({
+      nombre: c.nombre, telefono: c.telefono,
+      saldo: c.saldo || '', resultado: c.resultado || 'pendiente'
+    }))
   });
 });
 
@@ -364,59 +257,42 @@ app.post('/api/campaign/:id/cancel', auth, (req, res) => {
 app.post('/api/test-call', auth, async (req, res) => {
   try {
     const { phone, nombre = 'Prueba' } = req.body;
-    let p = (phone || '').replace(/\D/g, '');
-    if (p.length === 10) p = '52' + p;
-    if (!p.startsWith('+')) p = '+' + p;
-
-    const texto = `${nombre}, le llamamos de LeGaXi, despacho de cobranza, por un pagaré vencido con LMV CREDIA SA DE CV. Es urgente que se comunique. Presione 1 para hacer un convenio. Presione 2 para hablar con un asesor. Presione 3 si ya pagó. Presione 4 para repetir. Presione 5 para colgar.`;
-    const result = await sinchCallWithIVR(p, texto, 'test', 0, { nombre });
-    res.json({ success: !result.error, result });
+    const result = await makeCall(phone, 'test', 0, { nombre, telefono: phone });
+    res.json({ success: result.status === 'success', result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Llamada TTS simple (sin IVR)
-app.post('/api/test-tts', auth, async (req, res) => {
-  try {
-    const { phone, text = 'Hola, esta es una prueba de LeGaXi.' } = req.body;
-    let p = (phone || '').replace(/\D/g, '');
-    if (p.length === 10) p = '52' + p;
-    if (!p.startsWith('+')) p = '+' + p;
-    const result = await sinchCallTTS(p, text);
-    res.json({ success: !result.error, result });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+app.get('/api/balance', auth, async (req, res) => {
+  try { res.json(await zadarmaRequest('/v1/info/balance/')); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/config', auth, (req, res) => {
   res.json({
-    provider: 'sinch',
-    sinch: { configured: !!(SINCH_APP_KEY && SINCH_APP_SECRET), number: SINCH_FROM_NUMBER },
+    provider: 'zadarma',
+    zadarma: { configured: !!(ZADARMA_API_KEY && ZADARMA_API_SECRET), sip: ZADARMA_SIP, callerId: ZADARMA_CALLER_ID },
     gas: { configured: !!GAS_WEBHOOK_URL },
-    serverUrl: SERVER_URL,
-    activeCalls: callData.size,
-    activeCampaigns: campaigns.size
+    whatsapp: WHATSAPP_NUMBER, serverUrl: SERVER_URL,
+    activeCalls: activeCalls.size, activeCampaigns: campaigns.size
   });
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', provider: 'sinch', uptime: Math.floor(process.uptime()) }));
-app.get('/', (req, res) => res.json({ service: 'LeGaXi IVR v4.0 - Sinch', status: 'running' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', provider: 'zadarma', uptime: Math.floor(process.uptime()) }));
+app.get('/', (req, res) => res.json({ service: 'LeGaXi IVR v5.0 - Zadarma', status: 'running' }));
 
-// Servir panel
 const panelPath = path.join(__dirname, 'panel.html');
 if (fs.existsSync(panelPath)) app.get('/panel', (req, res) => res.sendFile(panelPath));
 
-// ============================================================
 app.listen(PORT, () => {
   console.log('╔═══════════════════════════════════════════════╗');
-  console.log('║   🚀 LeGaXi IVR v4.0 - SINCH                ║');
+  console.log('║   🚀 LeGaXi IVR v5.0 - ZADARMA              ║');
   console.log('╠═══════════════════════════════════════════════╣');
   console.log(`║ Puerto: ${PORT}`);
-  console.log(`║ Sinch App: ${SINCH_APP_KEY ? '✅' : '❌'}`);
-  console.log(`║ Número: ${SINCH_FROM_NUMBER}`);
-  console.log(`║ Callbacks: ${SERVER_URL}/sinch`);
+  console.log(`║ SIP: ${ZADARMA_SIP} | CallerID: ${ZADARMA_CALLER_ID}`);
+  console.log(`║ WhatsApp: ${WHATSAPP_NUMBER}`);
+  console.log(`║ Webhook: ${SERVER_URL}/zadarma`);
   console.log(`║ GAS: ${GAS_WEBHOOK_URL ? '✅' : '❌'}`);
   console.log('╚═══════════════════════════════════════════════╝');
 });
