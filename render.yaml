@@ -4,14 +4,18 @@ services:
     runtime: docker
     plan: free
     envVars:
-      - key: SINCH_APP_KEY
-        value: 5981949f-a13f-45c5-aa5d-be5e7dbcc063
-      - key: SINCH_APP_SECRET
-        value: tJaOJlbUlU6DEZFpUQ3DgQ==
-      - key: SINCH_FROM_NUMBER
-        value: "+447418631394"
+      - key: ZADARMA_API_KEY
+        value: "7160c986557a40199856"
+      - key: ZADARMA_API_SECRET
+        value: "873e28f828e60cdcb0cb"
+      - key: ZADARMA_SIP
+        value: "681294"
+      - key: ZADARMA_CALLER_ID
+        value: "+525598160911"
+      - key: WHATSAPP_NUMBER
+        value: "5544621100"
       - key: SERVER_URL
-        sync: false
+        value: "https://legaxi-ivr.onrender.com"
       - key: GAS_WEBHOOK_URL
         sync: false
       - key: PORT
