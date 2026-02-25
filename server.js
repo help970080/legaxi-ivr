@@ -42,32 +42,15 @@ function auth(req, res, next) {
   next();
 }
 
-// ---- ZADARMA API ----
-function zadarmaRequest(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const sortedKeys = Object.keys(params).sort();
-    const paramsStr = sortedKeys.map(k => `${k}=${params[k]}`).join('&');
-    const md5 = crypto.createHash('md5').update(paramsStr || '').digest('hex');
-    const signStr = method + paramsStr + md5;
-    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signStr).digest('base64');
-    const url = `https://api.zadarma.com${method}${paramsStr ? '?' + paramsStr : ''}`;
-    const urlObj = new URL(url);
+// ---- ZADARMA API (using official library) ----
+const { api: z_api } = require('zadarma');
 
-    const req = https.request({
-      hostname: urlObj.hostname,
-      path: urlObj.pathname + urlObj.search,
-      method: 'GET',
-      headers: { 'Authorization': `${ZADARMA_API_KEY}:${signature}` }
-    }, (res) => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { resolve({ status: 'error', raw: data }); }
-      });
-    });
-    req.on('error', reject);
-    req.end();
+function zadarmaRequest(method, params = {}) {
+  return z_api({
+    api_method: method,
+    api_user_key: ZADARMA_API_KEY,
+    api_secret_key: ZADARMA_API_SECRET,
+    params: Object.keys(params).length > 0 ? params : undefined
   });
 }
 
