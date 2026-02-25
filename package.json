@@ -1,7 +1,7 @@
 {
   "name": "legaxi-ivr",
-  "version": "4.0.0",
-  "description": "LeGaXi IVR - Sinch Voice API",
+  "version": "5.0.0",
+  "description": "LeGaXi IVR - Zadarma Voice API",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
