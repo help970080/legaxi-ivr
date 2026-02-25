@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LeGaXi IVR - Panel de Control</title>
+<title>LeGaXi IVR - Zadarma</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
@@ -19,15 +19,12 @@ body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-heig
 .row{display:flex;gap:20px;flex-wrap:wrap}
 .col{flex:1;min-width:280px}
 label{display:block;margin-bottom:4px;font-size:.85rem;color:#94a3b8}
-input,textarea,select{width:100%;padding:10px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:.9rem;margin-bottom:12px}
-textarea{height:100px;resize:vertical}
+input,textarea{width:100%;padding:10px;border:1px solid #475569;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:.9rem;margin-bottom:12px}
+textarea{height:120px;resize:vertical}
 button{padding:10px 24px;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:.9rem;transition:.2s}
 .btn-primary{background:#f59e0b;color:#0f172a}
 .btn-primary:hover{background:#d97706}
 .btn-danger{background:#dc2626;color:#fff}
-.btn-danger:hover{background:#b91c1c}
-.btn-success{background:#16a34a;color:#fff}
-.btn-success:hover{background:#15803d}
 .btn-sm{padding:8px 16px;font-size:.8rem}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:20px}
 .stat{background:#0f172a;border-radius:10px;padding:15px;text-align:center;border:1px solid #334155}
@@ -36,10 +33,10 @@ button{padding:10px 24px;border:none;border-radius:8px;font-weight:600;cursor:po
 table{width:100%;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;padding:10px;background:#334155;color:#f59e0b}
 td{padding:8px 10px;border-bottom:1px solid #1e293b}
-.res-convenio{color:#16a34a;font-weight:600}
-.res-asesor{color:#3b82f6;font-weight:600}
 .res-pago{color:#a855f7;font-weight:600}
-.res-colgar{color:#f59e0b;font-weight:600}
+.res-promesa{color:#16a34a;font-weight:600}
+.res-asesor{color:#3b82f6;font-weight:600}
+.res-contactado{color:#22d3ee;font-weight:600}
 .res-error{color:#dc2626}
 .res-pending{color:#94a3b8}
 .toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:8px;color:#fff;font-weight:600;z-index:999;animation:slideIn .3s}
@@ -51,57 +48,56 @@ td{padding:8px 10px;border-bottom:1px solid #1e293b}
 .progress-bar{height:8px;background:#334155;border-radius:4px;overflow:hidden;margin:10px 0}
 .progress-fill{height:100%;background:linear-gradient(90deg,#f59e0b,#16a34a);transition:width .5s}
 #clientList{max-height:400px;overflow-y:auto}
+.balance{color:#16a34a;font-weight:700;font-size:1.1rem}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>📞 LeGaXi IVR - Sinch</h1>
+  <h1>📞 LeGaXi IVR v5 - Zadarma</h1>
   <div class="status">
+    <span id="balanceBadge" class="badge ok">$--</span>
     <span id="configBadge" class="badge off">Verificando...</span>
-    <span id="sinchBadge" class="badge off">Sinch: --</span>
   </div>
 </div>
 
 <div class="container">
-  <!-- STATS -->
-  <div class="stats" id="statsRow">
+  <div class="stats">
     <div class="stat"><div class="num" id="sTotal">0</div><div class="lbl">Total</div></div>
     <div class="stat"><div class="num" id="sCompleted">0</div><div class="lbl">Completadas</div></div>
-    <div class="stat"><div class="num" id="sConvenio">0</div><div class="lbl">Convenios</div></div>
+    <div class="stat"><div class="num" id="sContactado">0</div><div class="lbl">Contactados</div></div>
+    <div class="stat"><div class="num" id="sPago">0</div><div class="lbl">Pago</div></div>
+    <div class="stat"><div class="num" id="sPromesa">0</div><div class="lbl">Promesa</div></div>
     <div class="stat"><div class="num" id="sAsesor">0</div><div class="lbl">Asesor</div></div>
-    <div class="stat"><div class="num" id="sPagos">0</div><div class="lbl">Ya Pagaron</div></div>
+    <div class="stat"><div class="num" id="sNoContesto">0</div><div class="lbl">No contestó</div></div>
   </div>
 
-  <!-- TEST CALL -->
   <div class="card">
     <h2>🧪 Llamada de Prueba</h2>
     <div class="test-section">
-      <div><label>Teléfono (10 dígitos)</label><input id="testPhone" placeholder="5544621100"></div>
-      <div><label>Nombre</label><input id="testName" placeholder="Prueba" value="Prueba"></div>
-      <button class="btn-primary btn-sm" onclick="testCall()">📞 Llamar con IVR</button>
-      <button class="btn-success btn-sm" onclick="testTTS()">🔊 Solo TTS</button>
+      <div><label>Teléfono (10 dígitos)</label><input id="testPhone" placeholder="5580743259"></div>
+      <div><label>Nombre</label><input id="testName" placeholder="Juan Pérez" value="Prueba"></div>
+      <button class="btn-primary btn-sm" onclick="testCall()">📞 Llamar</button>
     </div>
+    <p style="margin-top:10px;font-size:.8rem;color:#94a3b8">⚠️ MicroSIP debe estar Online con SIP 681294 para que las llamadas salgan</p>
   </div>
 
-  <!-- CAMPAIGN -->
   <div class="card">
     <h2>🚀 Campaña de Llamadas</h2>
     <div class="row">
       <div class="col">
         <label>Clientes (JSON)</label>
-        <textarea id="clientsInput" placeholder='[{"nombre":"Juan Pérez","telefono":"5512345678","saldo":"1500","diasAtraso":"30","promotor":"Carlos"}]'></textarea>
+        <textarea id="clientsInput" placeholder='[{"nombre":"Juan Pérez","telefono":"5512345678"}]'></textarea>
         <div style="display:flex;gap:10px;margin-top:8px">
           <button class="btn-sm btn-primary" onclick="loadSample()">📋 Ejemplo</button>
-          <label class="btn-sm btn-success" style="display:inline-flex;align-items:center;cursor:pointer">
+          <label class="btn-sm" style="background:#334155;color:#e2e8f0;display:inline-flex;align-items:center;cursor:pointer;border-radius:8px;padding:8px 16px">
             📁 CSV <input type="file" accept=".csv,.txt" style="display:none" onchange="loadCSV(this)">
           </label>
         </div>
       </div>
       <div class="col">
-        <label>Mensaje personalizado (opcional)</label>
-        <textarea id="msgInput" placeholder="Usa {nombre}, {saldo}, {dias}. Dejar vacío para mensaje default."></textarea>
         <label>Delay entre llamadas (seg)</label>
-        <input type="number" id="delayInput" value="15" min="5" max="120">
+        <input type="number" id="delayInput" value="25" min="10" max="120">
+        <p style="font-size:.8rem;color:#94a3b8">Mínimo 25s recomendado. Zadarma tiene máx 3 líneas simultáneas. Balance: <span id="balanceText" class="balance">$--</span></p>
       </div>
     </div>
     <div style="margin-top:15px;display:flex;gap:10px">
@@ -111,12 +107,11 @@ td{padding:8px 10px;border-bottom:1px solid #1e293b}
     <div class="progress-bar"><div class="progress-fill" id="progressBar" style="width:0%"></div></div>
   </div>
 
-  <!-- RESULTS TABLE -->
   <div class="card">
     <h2>📊 Resultados</h2>
     <div id="clientList">
       <table>
-        <thead><tr><th>#</th><th>Nombre</th><th>Teléfono</th><th>Saldo</th><th>Resultado</th></tr></thead>
+        <thead><tr><th>#</th><th>Nombre</th><th>Teléfono</th><th>Resultado</th></tr></thead>
         <tbody id="resultsBody"></tbody>
       </table>
     </div>
@@ -125,67 +120,50 @@ td{padding:8px 10px;border-bottom:1px solid #1e293b}
 
 <script>
 const API = window.location.origin;
-let currentCampaignId = null;
-let pollInterval = null;
+let currentCampaignId = null, pollInterval = null;
 
-// CONFIG CHECK
 async function checkConfig(){
   try{
-    const r=await fetch(API+'/api/config');
-    const d=await r.json();
-    document.getElementById('configBadge').textContent=d.provider==='sinch'?'✅ Conectado':'❌';
-    document.getElementById('configBadge').className='badge '+(d.sinch?.configured?'ok':'off');
-    document.getElementById('sinchBadge').textContent='Sinch: '+(d.sinch?.number||'--');
-    document.getElementById('sinchBadge').className='badge '+(d.sinch?.configured?'ok':'off');
-  }catch(e){
-    document.getElementById('configBadge').textContent='❌ Sin conexión';
-    document.getElementById('configBadge').className='badge off';
-  }
+    const r=await fetch(API+'/api/config');const d=await r.json();
+    document.getElementById('configBadge').textContent=d.zadarma?.configured?'✅ Zadarma':'❌';
+    document.getElementById('configBadge').className='badge '+(d.zadarma?.configured?'ok':'off');
+  }catch(e){document.getElementById('configBadge').textContent='❌ Sin conexión';document.getElementById('configBadge').className='badge off'}
+  try{
+    const r=await fetch(API+'/api/balance');const d=await r.json();
+    if(d.balance){
+      document.getElementById('balanceBadge').textContent='$'+d.balance+' USD';
+      document.getElementById('balanceText').textContent='$'+d.balance+' USD';
+    }
+  }catch(e){}
 }
 
-// TEST CALL
 async function testCall(){
   const phone=document.getElementById('testPhone').value.trim();
   const nombre=document.getElementById('testName').value.trim()||'Prueba';
-  if(!phone){toast('Ingresa un teléfono','error');return}
+  if(!phone||phone.length<10){toast('Ingresa teléfono de 10 dígitos','error');return}
   try{
     const r=await fetch(API+'/api/test-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,nombre})});
     const d=await r.json();
-    toast(d.success?'✅ Llamada enviada':'❌ '+JSON.stringify(d.error),d.success?'success':'error');
+    toast(d.success?'✅ Llamada enviada':'❌ Error: '+JSON.stringify(d),d.success?'success':'error');
   }catch(e){toast('Error: '+e.message,'error')}
 }
 
-async function testTTS(){
-  const phone=document.getElementById('testPhone').value.trim();
-  if(!phone){toast('Ingresa un teléfono','error');return}
-  try{
-    const r=await fetch(API+'/api/test-tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,text:'Hola, esta es una prueba del sistema LeGaXi. Gracias.'})});
-    const d=await r.json();
-    toast(d.success?'✅ TTS enviada':'❌ '+JSON.stringify(d.error),d.success?'success':'error');
-  }catch(e){toast('Error: '+e.message,'error')}
-}
-
-// CAMPAIGN
 async function startCampaign(){
   try{
     const clients=JSON.parse(document.getElementById('clientsInput').value);
-    const message=document.getElementById('msgInput').value.trim()||undefined;
-    const delaySeconds=parseInt(document.getElementById('delayInput').value)||15;
-    const r=await fetch(API+'/api/campaign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clients,message,delaySeconds})});
+    const delaySeconds=parseInt(document.getElementById('delayInput').value)||25;
+    const r=await fetch(API+'/api/campaign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({clients,delaySeconds})});
     const d=await r.json();
     if(d.error){toast('❌ '+d.error,'error');return}
     currentCampaignId=d.campaignId;
-    toast('🚀 Campaña '+d.campaignId+' iniciada ('+d.total+' clientes)','success');
+    toast('🚀 Campaña iniciada: '+d.total+' clientes','success');
     startPolling();
   }catch(e){toast('Error JSON: '+e.message,'error')}
 }
 
 async function cancelCampaign(){
   if(!currentCampaignId)return;
-  try{
-    await fetch(API+'/api/campaign/'+currentCampaignId+'/cancel',{method:'POST'});
-    toast('⛔ Campaña cancelada','error');
-  }catch(e){}
+  try{await fetch(API+'/api/campaign/'+currentCampaignId+'/cancel',{method:'POST'});toast('⛔ Cancelada','error')}catch(e){}
 }
 
 function startPolling(){
@@ -193,10 +171,8 @@ function startPolling(){
   pollInterval=setInterval(async()=>{
     if(!currentCampaignId)return;
     try{
-      const r=await fetch(API+'/api/campaign/'+currentCampaignId);
-      const d=await r.json();
-      updateStats(d);
-      updateTable(d.clients||[]);
+      const r=await fetch(API+'/api/campaign/'+currentCampaignId);const d=await r.json();
+      updateStats(d);updateTable(d.clients||[]);
       const pct=d.total?Math.round((d.completed/d.total)*100):0;
       document.getElementById('progressBar').style.width=pct+'%';
       if(d.completed>=d.total){clearInterval(pollInterval);toast('✅ Campaña completada','success')}
@@ -205,26 +181,27 @@ function startPolling(){
 }
 
 function updateStats(d){
-  const cls=d.clients||[];
+  const c=d.clients||[];
   document.getElementById('sTotal').textContent=d.total||0;
   document.getElementById('sCompleted').textContent=d.completed||0;
-  document.getElementById('sConvenio').textContent=cls.filter(c=>c.resultado==='convenio').length;
-  document.getElementById('sAsesor').textContent=cls.filter(c=>c.resultado==='asesor').length;
-  document.getElementById('sPagos').textContent=cls.filter(c=>c.resultado==='ya_pago').length;
+  document.getElementById('sContactado').textContent=c.filter(x=>x.resultado==='contactado').length;
+  document.getElementById('sPago').textContent=c.filter(x=>x.resultado==='pago').length;
+  document.getElementById('sPromesa').textContent=c.filter(x=>x.resultado==='promesa_pago').length;
+  document.getElementById('sAsesor').textContent=c.filter(x=>x.resultado==='asesor').length;
+  document.getElementById('sNoContesto').textContent=c.filter(x=>['no_contesto','error','error_api'].includes(x.resultado)).length;
 }
 
 function updateTable(cls){
-  const tb=document.getElementById('resultsBody');
-  tb.innerHTML=cls.map((c,i)=>{
-    const rc=c.resultado==='convenio'?'res-convenio':c.resultado==='asesor'?'res-asesor':c.resultado==='ya_pago'?'res-pago':c.resultado==='colgar'?'res-colgar':c.resultado==='pendiente'?'res-pending':'res-error';
-    return `<tr><td>${i+1}</td><td>${c.nombre}</td><td>${c.telefono}</td><td>$${c.saldo||'-'}</td><td class="${rc}">${c.resultado}</td></tr>`;
+  document.getElementById('resultsBody').innerHTML=cls.map((c,i)=>{
+    const rc=c.resultado==='pago'?'res-pago':c.resultado==='promesa_pago'?'res-promesa':c.resultado==='asesor'?'res-asesor':c.resultado==='contactado'?'res-contactado':c.resultado==='pendiente'?'res-pending':'res-error';
+    return `<tr><td>${i+1}</td><td>${c.nombre}</td><td>${c.telefono}</td><td class="${rc}">${c.resultado}</td></tr>`;
   }).join('');
 }
 
 function loadSample(){
   document.getElementById('clientsInput').value=JSON.stringify([
-    {"nombre":"Juan Pérez López","telefono":"5544621100","saldo":"2500","diasAtraso":"15","promotor":"Carlos"},
-    {"nombre":"María García","telefono":"5512345678","saldo":"1800","diasAtraso":"30","promotor":"Carlos"}
+    {"nombre":"Juan Pérez López","telefono":"5544621100"},
+    {"nombre":"María García","telefono":"5512345678"}
   ],null,2);
 }
 
@@ -242,14 +219,11 @@ function loadCSV(input){
       headers.forEach((h,j)=>{
         if(h.includes('nombre'))obj.nombre=vals[j];
         else if(h.includes('tel'))obj.telefono=vals[j];
-        else if(h.includes('saldo'))obj.saldo=vals[j];
-        else if(h.includes('dias')||h.includes('atraso'))obj.diasAtraso=vals[j];
-        else if(h.includes('promotor'))obj.promotor=vals[j];
       });
       if(obj.nombre&&obj.telefono)clients.push(obj);
     }
     document.getElementById('clientsInput').value=JSON.stringify(clients,null,2);
-    toast('📁 '+clients.length+' clientes cargados','success');
+    toast('📁 '+clients.length+' clientes','success');
   };
   reader.readAsText(file);
 }
