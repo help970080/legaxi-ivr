@@ -72,28 +72,20 @@ function zadarmaRequest(method, params = {}) {
     const signature = Buffer.from(sha1hex).toString('base64');
 
     const authHeader = `${ZADARMA_API_KEY}:${signature}`;
-    const httpMethod = Object.keys(params).length > 0 ? 'POST' : 'GET';
-    const urlPath = httpMethod === 'GET' && paramsStr ? `${method}?${paramsStr}` : method;
+    // Zadarma funciona con GET + query string (POST con body da "Wrong parameters")
+    const urlPath = paramsStr ? `${method}?${paramsStr}` : method;
 
-    console.log(`   🔑 API ${httpMethod} ${method}`);
+    console.log(`   🔑 API GET ${method}`);
     console.log(`   📦 paramsStr: ${paramsStr}`);
-    console.log(`   📦 signData: ${data}`);
-    console.log(`   📦 signature: ${signature}`);
-    console.log(`   📦 auth: ${authHeader}`);
 
     const options = {
       hostname: 'api.zadarma.com',
       path: urlPath,
-      method: httpMethod,
+      method: 'GET',
       headers: {
         'Authorization': authHeader
       }
     };
-
-    if (httpMethod === 'POST') {
-      options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      options.headers['Content-Length'] = Buffer.byteLength(paramsStr);
-    }
 
     const req = https.request(options, (res) => {
       let body = '';
@@ -105,7 +97,6 @@ function zadarmaRequest(method, params = {}) {
     });
 
     req.on('error', reject);
-    if (httpMethod === 'POST') req.write(paramsStr);
     req.end();
   });
 }
