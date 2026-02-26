@@ -44,42 +44,44 @@ function auth(req, res, next) {
   next();
 }
 
-// ---- ZADARMA API (implementación nativa, sin dependencias) ----
-// Algoritmo de firma según documentación oficial:
-// 1. Ordenar params por key alfabéticamente
-// 2. Generar query string: "key1=val1&key2=val2"
-// 3. signStr = methodPath + paramsStr + md5(paramsStr)
-// 4. signature = base64(hmac_sha1(signStr, secret))
-// 5. Header: Authorization: userKey:signature
+// ---- ZADARMA API (implementación nativa - el paquete npm tiene bug en la firma) ----
+// Bug en npm zadarma: hace digest('hex') → base64(hexString)
+// Correcto (como PHP): hash_hmac('sha1', data, secret, true) → base64(binaryHash)
 
 function zadarmaRequest(method, params = {}) {
   return new Promise((resolve, reject) => {
-    // 1. Ordenar parámetros alfabéticamente (ksort en PHP)
-    const sortedKeys = Object.keys(params).sort();
-    const pairs = [];
-    sortedKeys.forEach(k => {
-      pairs.push(`${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`);
-    });
-    const paramsStr = pairs.join('&');
+    const sortedParams = {};
+    Object.keys(params).sort().forEach(k => sortedParams[k] = params[k]);
 
-    // 2. Crear string para firmar: method + paramsStr + md5(paramsStr)
-    const md5hash = crypto.createHash('md5').update(paramsStr).digest('hex');
-    const signStr = method + paramsStr + md5hash;
+    // http_build_query equivalente (RFC1738: spaces as %20)
+    let paramsStr = '';
+    if (Object.keys(sortedParams).length > 0) {
+      paramsStr = Object.entries(sortedParams)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&');
+    }
 
-    // 3. HMAC-SHA1 con secret key, luego base64
+    // Firma: method + paramsStr + md5(paramsStr)
+    const md5 = crypto.createHash('md5').update(paramsStr).digest('hex');
+    const data = method + paramsStr + md5;
+
+    // HMAC-SHA1 → binary → base64 (como PHP con raw_output=true)
     const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET)
-      .update(signStr)
-      .digest('base64');
+      .update(data)
+      .digest('base64');  // directo a base64 del binary, NO hex→base64
 
-    // 4. Determinar método HTTP
-    const httpMethod = sortedKeys.length > 0 ? 'POST' : 'GET';
+    const authHeader = `${ZADARMA_API_KEY}:${signature}`;
+    const httpMethod = Object.keys(params).length > 0 ? 'POST' : 'GET';
+    const urlPath = httpMethod === 'GET' && paramsStr ? `${method}?${paramsStr}` : method;
+
+    console.log(`   🔑 API ${httpMethod} ${method}`);
 
     const options = {
       hostname: 'api.zadarma.com',
-      path: method,
+      path: urlPath,
       method: httpMethod,
       headers: {
-        'Authorization': `${ZADARMA_API_KEY}:${signature}`
+        'Authorization': authHeader
       }
     };
 
@@ -88,26 +90,17 @@ function zadarmaRequest(method, params = {}) {
       options.headers['Content-Length'] = Buffer.byteLength(paramsStr);
     }
 
-    console.log(`   🔑 API ${httpMethod} ${method} params=${paramsStr.substring(0, 100)}`);
-
     const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
+      let body = '';
+      res.on('data', chunk => body += chunk);
       res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-          resolve(parsed);
-        } catch (e) {
-          resolve({ status: 'error', raw: data });
-        }
+        try { resolve(JSON.parse(body)); }
+        catch (e) { resolve({ status: 'error', raw: body }); }
       });
     });
 
     req.on('error', reject);
-
-    if (httpMethod === 'POST') {
-      req.write(paramsStr);
-    }
+    if (httpMethod === 'POST') req.write(paramsStr);
     req.end();
   });
 }
