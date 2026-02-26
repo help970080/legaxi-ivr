@@ -706,29 +706,40 @@ app.get('/api/debug-auth', auth, async (req, res) => {
       clean_secret_length: cleanSecret.length,
     };
 
-    // Hacer request con keys limpias
-    const result = await new Promise((resolve) => {
-      const options = {
-        hostname: 'api.zadarma.com',
-        path: '/v1/info/balance/',
-        method: 'GET',
-        headers: {
-          'Authorization': cleanKey + ':' + cleanSig
-        }
-      };
-      const req = https.request(options, (r) => {
-        let body = '';
-        r.on('data', c => body += c);
-        r.on('end', () => {
-          try { resolve(JSON.parse(body)); }
-          catch(e) { resolve({ raw: body, statusCode: r.statusCode }); }
-        });
-      });
-      req.on('error', e => resolve({ error: e.message }));
-      req.end();
-    });
+    // Método buggy del npm (hex string → base64)
+    const sha1hex = crypto.createHmac('sha1', cleanSecret).update(signData).digest('hex');
+    const buggySig = Buffer.from(sha1hex).toString('base64');
 
-    res.json({ keyInfo, signatureDebug, cleanTest, balanceTest: result });
+    // Helper para probar una firma
+    function testAuth(label, authHeader) {
+      return new Promise((resolve) => {
+        const options = {
+          hostname: 'api.zadarma.com',
+          path: '/v1/info/balance/',
+          method: 'GET',
+          headers: { 'Authorization': authHeader }
+        };
+        const req = https.request(options, (r) => {
+          let body = '';
+          r.on('data', c => body += c);
+          r.on('end', () => {
+            try { resolve({ label, statusCode: r.statusCode, headers: r.headers, body: JSON.parse(body) }); }
+            catch(e) { resolve({ label, statusCode: r.statusCode, raw: body }); }
+          });
+        });
+        req.on('error', e => resolve({ label, error: e.message }));
+        req.end();
+      });
+    }
+
+    // Probar 3 métodos
+    const [test1, test2, test3] = await Promise.all([
+      testAuth('correct_base64', cleanKey + ':' + cleanSig),
+      testAuth('buggy_npm_hex2base64', cleanKey + ':' + buggySig),
+      testAuth('no_trailing_slash', cleanKey + ':' + crypto.createHmac('sha1', cleanSecret).update('/v1/info/balanced41d8cd98f00b204e9800998ecf8427e').digest('base64'))
+    ]);
+
+    res.json({ keyInfo, signatureDebug, cleanTest, tests: { test1, test2, test3 } });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
   }
