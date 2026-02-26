@@ -665,7 +665,6 @@ app.get('/health', (req, res) => {
 // --- DEBUG API AUTH ---
 app.get('/api/debug-auth', auth, async (req, res) => {
   try {
-    // Mostrar info de keys (parcial por seguridad)
     const keyInfo = {
       key_length: ZADARMA_API_KEY.length,
       key_preview: ZADARMA_API_KEY.substring(0, 6) + '...' + ZADARMA_API_KEY.slice(-4),
@@ -673,17 +672,65 @@ app.get('/api/debug-auth', auth, async (req, res) => {
       secret_preview: ZADARMA_API_SECRET.substring(0, 6) + '...' + ZADARMA_API_SECRET.slice(-4),
       key_has_spaces: ZADARMA_API_KEY !== ZADARMA_API_KEY.trim(),
       secret_has_spaces: ZADARMA_API_SECRET !== ZADARMA_API_SECRET.trim(),
+      key_has_newline: ZADARMA_API_KEY.includes('\n') || ZADARMA_API_KEY.includes('\r'),
+      secret_has_newline: ZADARMA_API_SECRET.includes('\n') || ZADARMA_API_SECRET.includes('\r'),
+      key_charCodes: [...ZADARMA_API_KEY].map(c => c.charCodeAt(0)),
+      secret_charCodes: [...ZADARMA_API_SECRET].map(c => c.charCodeAt(0)),
     };
 
-    // Test simple: balance
-    const result = await zadarmaRequest('/v1/info/balance/');
+    // Mostrar cálculo de firma paso a paso
+    const method = '/v1/info/balance/';
+    const paramsStr = '';
+    const md5 = crypto.createHash('md5').update(paramsStr).digest('hex');
+    const signData = method + paramsStr + md5;
+    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signData).digest('base64');
 
-    res.json({
-      keyInfo,
-      balanceTest: result
+    const signatureDebug = {
+      method,
+      paramsStr,
+      md5_of_params: md5,
+      sign_data: signData,
+      signature,
+      auth_header: ZADARMA_API_KEY + ':' + signature
+    };
+
+    // Test con las keys limpias (trim)
+    const cleanKey = ZADARMA_API_KEY.trim().replace(/[^\x20-\x7E]/g, '');
+    const cleanSecret = ZADARMA_API_SECRET.trim().replace(/[^\x20-\x7E]/g, '');
+    const cleanSig = crypto.createHmac('sha1', cleanSecret).update(signData).digest('base64');
+
+    const cleanTest = {
+      key_cleaned: cleanKey !== ZADARMA_API_KEY,
+      secret_cleaned: cleanSecret !== ZADARMA_API_SECRET,
+      clean_key_length: cleanKey.length,
+      clean_secret_length: cleanSecret.length,
+    };
+
+    // Hacer request con keys limpias
+    const result = await new Promise((resolve) => {
+      const options = {
+        hostname: 'api.zadarma.com',
+        path: '/v1/info/balance/',
+        method: 'GET',
+        headers: {
+          'Authorization': cleanKey + ':' + cleanSig
+        }
+      };
+      const req = https.request(options, (r) => {
+        let body = '';
+        r.on('data', c => body += c);
+        r.on('end', () => {
+          try { resolve(JSON.parse(body)); }
+          catch(e) { resolve({ raw: body, statusCode: r.statusCode }); }
+        });
+      });
+      req.on('error', e => resolve({ error: e.message }));
+      req.end();
     });
+
+    res.json({ keyInfo, signatureDebug, cleanTest, balanceTest: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
