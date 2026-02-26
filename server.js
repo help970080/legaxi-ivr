@@ -44,15 +44,54 @@ function auth(req, res, next) {
   next();
 }
 
-// ---- ZADARMA API ----
-const { api: z_api } = require('zadarma');
-
+// ---- ZADARMA API (implementación nativa, sin dependencias) ----
 function zadarmaRequest(method, params = {}) {
-  return z_api({
-    api_method: method,
-    api_user_key: ZADARMA_API_KEY,
-    api_secret_key: ZADARMA_API_SECRET,
-    params: Object.keys(params).length > 0 ? params : undefined
+  return new Promise((resolve, reject) => {
+    // Ordenar parámetros alfabéticamente
+    const sortedKeys = Object.keys(params).sort();
+    const sortedParams = {};
+    sortedKeys.forEach(k => { sortedParams[k] = params[k]; });
+
+    const queryString = new URLSearchParams(sortedParams).toString();
+    const path = method;
+
+    // Generar firma según documentación Zadarma
+    const signStr = path + queryString + crypto.createHash('md5').update(queryString).digest('hex');
+    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signStr).digest('base64');
+
+    const options = {
+      hostname: 'api.zadarma.com',
+      path: queryString ? `${path}?${queryString}` : path,
+      method: Object.keys(params).length > 0 ? 'POST' : 'GET',
+      headers: {
+        'Authorization': `${ZADARMA_API_KEY}:${signature}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    };
+
+    // Para POST, enviar params en el body
+    if (Object.keys(params).length > 0) {
+      options.path = path;
+      options.headers['Content-Length'] = Buffer.byteLength(queryString);
+    }
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          resolve({ status: 'error', raw: data });
+        }
+      });
+    });
+
+    req.on('error', reject);
+    if (Object.keys(params).length > 0) {
+      req.write(queryString);
+    }
+    req.end();
   });
 }
 
@@ -669,6 +708,79 @@ setInterval(() => {
 }, 60000);
 
 // ============================================================
+// REGISTRAR WEBHOOK EN ZADARMA (vía API)
+// ============================================================
+async function registerWebhook() {
+  if (!ZADARMA_API_KEY || !ZADARMA_API_SECRET) {
+    console.log('⚠️ No se puede registrar webhook: faltan API keys');
+    return;
+  }
+
+  const webhookUrl = `${SERVER_URL}/zadarma`;
+  console.log(`\n🔗 Registrando webhook URL: ${webhookUrl}`);
+
+  try {
+    // Registrar URL de notificaciones de llamadas PBX
+    const result = await zadarmaRequest('/v1/pbx/callinfo/url/', { url: webhookUrl });
+    console.log(`   Callinfo URL: ${JSON.stringify(result)}`);
+
+    // Habilitar todas las notificaciones
+    const hooks = await zadarmaRequest('/v1/pbx/callinfo/notifications/', {
+      call_start: 'true',
+      call_end: 'true',
+      ivr: 'true',
+      out_start: 'true',
+      out_end: 'true'
+    });
+    console.log(`   Notificaciones: ${JSON.stringify(hooks)}`);
+
+    // Verificar configuración actual
+    const current = await zadarmaRequest('/v1/pbx/callinfo/');
+    console.log(`   Config actual: ${JSON.stringify(current)}`);
+
+    console.log('✅ Webhook registrado exitosamente');
+  } catch (err) {
+    console.error('❌ Error registrando webhook:', err.message);
+    console.log('   Intenta registrar manualmente en: my.zadarma.com/marketplace/#tab-apiWebhooks');
+  }
+}
+
+// Endpoint manual para registrar webhook
+app.post('/api/register-webhook', auth, async (req, res) => {
+  try {
+    const webhookUrl = `${SERVER_URL}/zadarma`;
+
+    const result1 = await zadarmaRequest('/v1/pbx/callinfo/url/', { url: webhookUrl });
+    const result2 = await zadarmaRequest('/v1/pbx/callinfo/notifications/', {
+      call_start: 'true',
+      call_end: 'true',
+      ivr: 'true',
+      out_start: 'true',
+      out_end: 'true'
+    });
+
+    res.json({
+      success: true,
+      webhookUrl,
+      callinfo: result1,
+      notifications: result2
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Endpoint para ver webhook actual
+app.get('/api/webhook-status', auth, async (req, res) => {
+  try {
+    const result = await zadarmaRequest('/v1/pbx/callinfo/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // START
 // ============================================================
 app.listen(PORT, () => {
@@ -684,4 +796,7 @@ app.listen(PORT, () => {
   console.log(`║ GAS:        ${GAS_WEBHOOK_URL ? '✅ Configurado' : '❌ No configurado'}`);
   console.log(`║ API Key:    ${API_KEY ? '✅ Protegido' : '⚠️ Sin protección'}`);
   console.log('╚══════════════════════════════════════════════════════╝');
+
+  // Auto-registrar webhook al arrancar (con delay para que el server esté listo)
+  setTimeout(registerWebhook, 3000);
 });
