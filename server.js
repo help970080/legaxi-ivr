@@ -120,24 +120,18 @@ const phoneToCall = new Map();       // key: phone → callData (lookup rápido)
 async function makeCall(phone, campaignId, index, clientData) {
   let cleanPhone = (phone || '').replace(/\D/g, '');
 
-  // Formato internacional para México: debe ser 52 + 10 dígitos
-  if (cleanPhone.length === 10) {
-    cleanPhone = '52' + cleanPhone;  // Agregar código de país
-  } else if (cleanPhone.startsWith('52') && cleanPhone.length === 12) {
-    // Ya tiene formato correcto
-  } else if (cleanPhone.startsWith('+52')) {
-    cleanPhone = cleanPhone.substring(1); // quitar +
-  } else if (cleanPhone.startsWith('+')) {
-    cleanPhone = cleanPhone.substring(1); // quitar + de otros países
-  }
+  // Zadarma con prefijo MX configurado: solo 10 dígitos
+  if (cleanPhone.startsWith('+52')) cleanPhone = cleanPhone.substring(3);
+  if (cleanPhone.startsWith('52') && cleanPhone.length === 12) cleanPhone = cleanPhone.substring(2);
+  if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
+  // Asegurar 10 dígitos
+  if (cleanPhone.length > 10) cleanPhone = cleanPhone.slice(-10);
 
-  // callback con predicted: llama al cliente primero,
-  // cuando contesta lo conecta al "from" (escenario IVR)
   const params = {
     from: ZADARMA_SCENARIO,   // Escenario PBX con IVR (formato 0-1)
     to: cleanPhone,
-    sip: ZADARMA_SIP,         // Extensión para CallerID y estadísticas
-    predicted: 'predicted'    // String 'predicted' según docs y npm example
+    sip: ZADARMA_SIP,
+    predicted: 'predicted'
   };
 
   console.log(`📞 [${campaignId}] #${index} Llamando ${clientData.nombre} → ${cleanPhone}`);
@@ -653,6 +647,45 @@ app.get('/api/config', auth, (req, res) => {
     phoneIndex: phoneToCall.size,
     activeCampaigns: campaigns.size
   });
+});
+
+// --- DEBUG CALL - probar diferentes params ---
+app.get('/api/debug-call', auth, async (req, res) => {
+  try {
+    const phone = (req.query.phone || '5544621100').replace(/\D/g, '').slice(-10);
+    
+    const tests = [];
+    
+    // Test 1: from=scenario, to=10dig, predicted
+    tests.push({ label: 'scenario_10dig', params: { from: ZADARMA_SCENARIO, to: phone, sip: '100', predicted: 'predicted' }});
+    
+    // Test 2: from=ext100, to=10dig, predicted  
+    tests.push({ label: 'ext100_10dig', params: { from: '100', to: phone, sip: '100', predicted: 'predicted' }});
+    
+    // Test 3: from=scenario, to=52+10dig, predicted
+    tests.push({ label: 'scenario_intl', params: { from: ZADARMA_SCENARIO, to: '52' + phone, sip: '100', predicted: 'predicted' }});
+    
+    // Test 4: from=ext100, to=52+10dig, predicted
+    tests.push({ label: 'ext100_intl', params: { from: '100', to: '52' + phone, sip: '100', predicted: 'predicted' }});
+    
+    // Test 5: simple from=ext, to=10dig, NO predicted
+    tests.push({ label: 'simple_no_predicted', params: { from: '100', to: phone }});
+    
+    // Test 6: from=scenario, to=10dig, predicted=true
+    tests.push({ label: 'scenario_true', params: { from: ZADARMA_SCENARIO, to: phone, sip: '100', predicted: 'true' }});
+    
+    const results = [];
+    for (const t of tests) {
+      const r = await zadarmaRequest('/v1/request/callback/', t.params);
+      results.push({ label: t.label, params: t.params, result: r });
+      if (r.status === 'success') break;
+      await new Promise(ok => setTimeout(ok, 500));
+    }
+    
+    res.json({ scenario: ZADARMA_SCENARIO, sip: ZADARMA_SIP, callerId: ZADARMA_CALLER_ID, tests: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- HEALTH ---
