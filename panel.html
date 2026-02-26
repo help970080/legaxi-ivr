@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LeGaXi IVR v6.0 - Panel de Control</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1923; color: #e0e0e0; min-height: 100vh; }
@@ -11,8 +12,6 @@
   .header h1 { font-size: 22px; color: #2d9cdb; }
   .header-right { display: flex; align-items: center; gap: 15px; }
   .header .balance { background: #1e3a2f; padding: 8px 16px; border-radius: 8px; color: #4caf50; font-weight: bold; font-size: 16px; }
-  .status-ok { color: #4caf50; font-size: 13px; }
-  .status-err { color: #e53935; font-size: 13px; }
   .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
   @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
@@ -21,8 +20,8 @@
   .form-group { margin-bottom: 12px; }
   .form-group label { display: block; color: #8899aa; font-size: 13px; margin-bottom: 4px; }
   .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; background: #0f1923; border: 1px solid #2a3a4a; border-radius: 8px; color: #e0e0e0; font-size: 14px; }
-  .form-group textarea { height: 140px; font-family: monospace; font-size: 12px; resize: vertical; }
-  .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  .form-group textarea { height: 100px; font-family: monospace; font-size: 12px; resize: vertical; }
+  .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
   .btn-primary { background: #2d9cdb; color: white; }
   .btn-primary:hover { background: #2488c4; }
   .btn-success { background: #4caf50; color: white; }
@@ -30,9 +29,10 @@
   .btn-danger { background: #e53935; color: white; }
   .btn-danger:hover { background: #c62828; }
   .btn-warning { background: #ff9800; color: white; }
+  .btn-sm { padding: 6px 14px; font-size: 12px; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-  .log { background: #0a1520; border: 1px solid #1a2a3a; border-radius: 8px; padding: 15px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6; }
+  .log { background: #0a1520; border: 1px solid #1a2a3a; border-radius: 8px; padding: 15px; height: 250px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6; }
   .log .info { color: #2d9cdb; }
   .log .success { color: #4caf50; }
   .log .error { color: #e53935; }
@@ -46,28 +46,70 @@
   .stat-card.green .number { color: #4caf50; }
   .stat-card.orange .number { color: #ff9800; }
   .stat-card.red .number { color: #e53935; }
-  .results-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-  .results-table th { text-align: left; padding: 8px; color: #8899aa; border-bottom: 1px solid #2a3a4a; font-size: 11px; }
-  .results-table td { padding: 8px; border-bottom: 1px solid #1a2a3a; }
-  .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; display: inline-block; }
-  .badge-pending { background: #333; color: #999; }
-  .badge-pago { background: #1b5e20; color: #81c784; }
-  .badge-promesa { background: #e65100; color: #ffb74d; }
-  .badge-asesor { background: #1565c0; color: #64b5f6; }
-  .badge-contactado { background: #4a148c; color: #ce93d8; }
-  .badge-no-contesto { background: #b71c1c; color: #ef9a9a; }
-  .badge-error { background: #4a0000; color: #ff5252; }
   .full-width { grid-column: 1 / -1; }
   .config-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a2a3a; font-size: 13px; }
   .config-item .key { color: #8899aa; }
   .config-item .val { color: #e0e0e0; font-family: monospace; font-size: 12px; }
   .config-item .val.ok { color: #4caf50; }
   .config-item .val.err { color: #e53935; }
+
+  /* Upload zone */
+  .upload-zone { border: 2px dashed #2a3a4a; border-radius: 12px; padding: 30px; text-align: center; cursor: pointer; transition: all 0.3s; margin-bottom: 15px; position: relative; }
+  .upload-zone:hover, .upload-zone.dragover { border-color: #2d9cdb; background: rgba(45,156,219,0.05); }
+  .upload-zone .icon { font-size: 40px; margin-bottom: 10px; }
+  .upload-zone .text { color: #8899aa; font-size: 14px; }
+  .upload-zone .text strong { color: #2d9cdb; }
+  .upload-zone .formats { color: #556677; font-size: 11px; margin-top: 8px; }
+  .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+  /* Preview table */
+  .preview-wrap { max-height: 300px; overflow: auto; border: 1px solid #2a3a4a; border-radius: 8px; margin: 10px 0; }
+  .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .preview-table th { position: sticky; top: 0; background: #243447; color: #2d9cdb; padding: 8px; text-align: left; font-size: 11px; z-index: 1; }
+  .preview-table td { padding: 6px 8px; border-bottom: 1px solid #1a2a3a; white-space: nowrap; }
+  .preview-table tr:hover { background: rgba(45,156,219,0.05); }
+  .preview-table .row-num { color: #556677; width: 30px; text-align: center; }
+  .preview-table .tel-ok { color: #4caf50; }
+  .preview-table .tel-bad { color: #e53935; font-weight: bold; }
+  .preview-summary { display: flex; gap: 20px; padding: 10px 0; font-size: 13px; flex-wrap: wrap; }
+  .preview-summary span { display: flex; align-items: center; gap: 5px; }
+  .preview-summary .good { color: #4caf50; }
+  .preview-summary .bad { color: #e53935; }
+  .preview-summary .total { color: #2d9cdb; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; margin-bottom: 15px; }
+  .tab { padding: 10px 20px; background: #0f1923; border: 1px solid #2a3a4a; color: #8899aa; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+  .tab:first-child { border-radius: 8px 0 0 8px; }
+  .tab:last-child { border-radius: 0 8px 8px 0; }
+  .tab.active { background: #2d9cdb; color: white; border-color: #2d9cdb; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Badge */
+  .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; display: inline-block; }
+  .badge-pending { background: #333; color: #999; }
+  .badge-llamando { background: #1565c0; color: #90caf9; animation: pulse 1s infinite; }
+  .badge-pago { background: #1b5e20; color: #81c784; }
+  .badge-promesa { background: #e65100; color: #ffb74d; }
+  .badge-asesor { background: #4a148c; color: #ce93d8; }
+  .badge-contactado { background: #00695c; color: #80cbc4; }
+  .badge-no-contesto { background: #b71c1c; color: #ef9a9a; }
+  .badge-error { background: #4a0000; color: #ff5252; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+  .results-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .results-table th { text-align: left; padding: 8px; color: #8899aa; border-bottom: 1px solid #2a3a4a; font-size: 11px; }
+  .results-table td { padding: 8px; border-bottom: 1px solid #1a2a3a; }
+
   .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 999; }
   .login-box { background: #1a2a3a; padding: 30px; border-radius: 12px; border: 1px solid #2d9cdb; text-align: center; min-width: 320px; }
   .login-box h2 { color: #2d9cdb; margin-bottom: 20px; }
   .login-box input { width: 100%; padding: 12px; background: #0f1923; border: 1px solid #2a3a4a; border-radius: 8px; color: #e0e0e0; font-size: 16px; text-align: center; margin-bottom: 15px; }
   .hidden { display: none !important; }
+
+  .progress-bar { width: 100%; height: 6px; background: #0f1923; border-radius: 3px; overflow: hidden; margin: 10px 0; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #2d9cdb, #4caf50); border-radius: 3px; transition: width 0.5s; }
 </style>
 </head>
 <body>
@@ -78,7 +120,7 @@
     <p style="color:#8899aa;margin-bottom:20px;">Ingresa la clave API</p>
     <input type="password" id="apiKeyInput" placeholder="API Key" autofocus>
     <button class="btn btn-primary" onclick="doLogin()" style="width:100%;">Entrar</button>
-    <p id="loginError" style="color:#e53935;margin-top:10px;" class="hidden">Clave incorrecta</p>
+    <p id="loginError" style="color:#e53935;margin-top:10px;" class="hidden">Clave incorrecta o servidor no disponible</p>
   </div>
 </div>
 
@@ -91,55 +133,118 @@
   </div>
 </div>
 <div class="container">
+
+  <!-- Stats -->
   <div class="stats">
     <div class="stat-card blue"><div class="number" id="statTotal">0</div><div class="label">TOTAL</div></div>
     <div class="stat-card green"><div class="number" id="statContestadas">0</div><div class="label">CONTESTADAS</div></div>
     <div class="stat-card orange"><div class="number" id="statPendientes">0</div><div class="label">PENDIENTES</div></div>
     <div class="stat-card red"><div class="number" id="statNoContesto">0</div><div class="label">NO CONTESTÓ</div></div>
   </div>
+
   <div class="grid">
+    <!-- Llamada de Prueba -->
     <div class="card">
       <h2>🧪 Llamada de Prueba</h2>
       <div class="form-group"><label>Teléfono (10 dígitos)</label><input type="tel" id="testPhone" placeholder="5544621100"></div>
-      <div class="form-group"><label>Nombre</label><input type="text" id="testNombre" value="Leo Prueba"></div>
-      <div class="form-group"><label>Saldo</label><input type="text" id="testSaldo" value="500"></div>
+      <div class="form-group"><label>Nombre</label><input type="text" id="testNombre" placeholder="Juan Pérez"></div>
+      <div class="form-group"><label>Saldo</label><input type="text" id="testSaldo" placeholder="5000"></div>
       <div class="btn-row"><button class="btn btn-primary" onclick="testCall()">📞 Llamar</button></div>
     </div>
+
+    <!-- Configuración -->
     <div class="card">
       <h2>⚙️ Configuración</h2>
       <div id="configDisplay"><div class="config-item"><span class="key">Cargando...</span></div></div>
       <div class="btn-row" style="margin-top:15px;">
-        <button class="btn btn-primary" onclick="loadConfig()">🔄 Recargar</button>
-        <button class="btn btn-success" onclick="loadBalance()">💰 Balance</button>
+        <button class="btn btn-primary btn-sm" onclick="loadConfig()">🔄 Recargar</button>
+        <button class="btn btn-success btn-sm" onclick="loadBalance()">💰 Balance</button>
       </div>
     </div>
+
+    <!-- ======= CAMPAÑA MASIVA ======= -->
     <div class="card full-width">
-      <h2>📋 Campaña de Llamadas</h2>
-      <div class="grid" style="margin-top:0;">
-        <div>
-          <div class="form-group">
-            <label>Lista de Clientes (JSON)</label>
-            <textarea id="campaignClients" placeholder='[{"nombre":"Juan","telefono":"5544621100","saldo":"5000","diasAtraso":"30"}]'></textarea>
-          </div>
-          <div class="form-group"><label>Segundos entre llamadas</label><input type="number" id="campaignDelay" value="45" min="15" max="120"></div>
-          <div class="btn-row">
-            <button class="btn btn-success" id="btnStart" onclick="startCampaign()">🚀 Iniciar</button>
-            <button class="btn btn-danger" id="btnCancel" onclick="cancelCampaign()" disabled>⛔ Cancelar</button>
-          </div>
+      <h2>📋 Campaña de Llamadas Masivas</h2>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('upload')">📁 Subir Archivo</div>
+        <div class="tab" onclick="switchTab('paste')">📋 Pegar Datos</div>
+        <div class="tab" onclick="switchTab('json')">{ } JSON</div>
+      </div>
+
+      <!-- Tab: Upload -->
+      <div class="tab-content active" id="tab-upload">
+        <div class="upload-zone" id="dropZone">
+          <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.tsv" onchange="handleFile(this.files[0])">
+          <div class="icon">📂</div>
+          <div class="text">Arrastra tu archivo aquí o <strong>haz clic para seleccionar</strong></div>
+          <div class="formats">Formatos: .xlsx, .csv, .xls, .tsv — Columnas: nombre, telefono, saldo, diasAtraso</div>
         </div>
-        <div>
-          <div class="form-group"><label>Resultados</label></div>
-          <div style="max-height:250px;overflow-y:auto;">
-            <table class="results-table"><thead><tr><th>Nombre</th><th>Tel</th><th>Saldo</th><th>Resultado</th></tr></thead>
-            <tbody id="campaignResults"><tr><td colspan="4" style="color:#666;text-align:center;">Sin campaña</td></tr></tbody></table>
+      </div>
+
+      <!-- Tab: Paste -->
+      <div class="tab-content" id="tab-paste">
+        <div class="form-group">
+          <label>Pega desde Excel (Ctrl+V) — separado por tabs o comas. Primera fila = encabezados</label>
+          <textarea id="pasteArea" placeholder="nombre	telefono	saldo	diasAtraso
+Juan Pérez	5544621100	5000	30
+María López	5580743259	3200	15"></textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="parsePaste()">📋 Procesar Datos</button>
+      </div>
+
+      <!-- Tab: JSON -->
+      <div class="tab-content" id="tab-json">
+        <div class="form-group">
+          <label>JSON Array</label>
+          <textarea id="jsonArea" placeholder='[{"nombre":"Juan","telefono":"5544621100","saldo":"5000","diasAtraso":"30"}]'></textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="parseJSON()">{ } Procesar JSON</button>
+      </div>
+
+      <!-- Preview -->
+      <div id="previewSection" class="hidden">
+        <div class="preview-summary" id="previewSummary"></div>
+        <div class="preview-wrap">
+          <table class="preview-table">
+            <thead id="previewHead"></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+
+        <div style="display:flex;gap:15px;align-items:center;margin-top:15px;flex-wrap:wrap;">
+          <div class="form-group" style="margin:0;flex:0 0 200px;">
+            <label>Segundos entre llamadas</label>
+            <input type="number" id="campaignDelay" value="45" min="15" max="120">
+          </div>
+          <div class="btn-row" style="margin:0;">
+            <button class="btn btn-success" id="btnStart" onclick="startCampaign()">🚀 Iniciar Campaña</button>
+            <button class="btn btn-danger" id="btnCancel" onclick="cancelCampaign()" disabled>⛔ Cancelar</button>
+            <button class="btn btn-warning btn-sm" onclick="clearPreview()">🗑️ Limpiar</button>
           </div>
         </div>
       </div>
+
+      <!-- Campaign Progress -->
+      <div id="campaignProgress" class="hidden" style="margin-top:15px;">
+        <div style="display:flex;justify-content:space-between;font-size:13px;">
+          <span id="progressText">Procesando...</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        <div style="max-height:250px;overflow-y:auto;margin-top:10px;">
+          <table class="results-table"><thead><tr><th>#</th><th>Nombre</th><th>Teléfono</th><th>Saldo</th><th>Resultado</th></tr></thead>
+          <tbody id="campaignResults"></tbody></table>
+        </div>
+      </div>
     </div>
+
+    <!-- Log -->
     <div class="card full-width">
       <h2>📝 Log</h2>
       <div class="log" id="logContainer"></div>
-      <div class="btn-row" style="margin-top:10px;"><button class="btn btn-primary" onclick="clearLog()">🗑️ Limpiar</button></div>
+      <div class="btn-row" style="margin-top:10px;"><button class="btn btn-primary btn-sm" onclick="clearLog()">🗑️ Limpiar</button></div>
     </div>
   </div>
 </div>
@@ -150,62 +255,323 @@ const BASE = window.location.origin;
 let KEY = '';
 let campaignId = null;
 let poller = null;
+let loadedClients = []; // parsed clients ready for campaign
 
+// ============ AUTH ============
 function api(path) {
   const s = path.includes('?') ? '&' : '?';
   return `${BASE}${path}${s}api_key=${encodeURIComponent(KEY)}`;
 }
-
 function log(m, t='info') {
   const el = document.getElementById('logContainer');
   el.innerHTML += `<div class="${t}">[${new Date().toLocaleTimeString()}] ${m}</div>`;
   el.scrollTop = el.scrollHeight;
 }
-
-function badge(r) {
-  if (!r || r==='pendiente') return 'badge-pending';
-  if (r.includes('pago') && !r.includes('promesa')) return 'badge-pago';
-  if (r.includes('promesa')) return 'badge-promesa';
-  if (r.includes('asesor')) return 'badge-asesor';
-  if (r.includes('contactado')) return 'badge-contactado';
-  if (r.includes('no_contesto')||r.includes('sin_resp')) return 'badge-no-contesto';
-  return 'badge-error';
-}
-
 function doLogin() {
   const k = document.getElementById('apiKeyInput').value.trim();
   if (!k) return;
   KEY = k;
-  fetch(api('/api/config')).then(r => {
-    if (!r.ok) throw 0;
-    return r.json();
-  }).then(() => {
+  fetch(api('/api/config')).then(r => { if(!r.ok) throw 0; return r.json(); }).then(() => {
     document.getElementById('loginOverlay').classList.add('hidden');
     document.getElementById('mainApp').classList.remove('hidden');
     localStorage.setItem('lgx_key', KEY);
     init();
-  }).catch(() => {
-    document.getElementById('loginError').classList.remove('hidden');
-  });
+  }).catch(() => { document.getElementById('loginError').classList.remove('hidden'); });
 }
 document.getElementById('apiKeyInput').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 
+// ============ TABS ============
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const tabs = ['upload','paste','json'];
+    t.classList.toggle('active', tabs[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+// ============ FILE PARSING ============
+function cleanPhone(p) {
+  if (!p) return '';
+  let s = String(p).replace(/[\s\-\(\)\+\.]/g, '');
+  if (s.startsWith('52') && s.length === 12) s = s.slice(2);
+  if (s.startsWith('044') || s.startsWith('045')) s = s.slice(3);
+  if (s.startsWith('1') && s.length === 11) s = s.slice(1);
+  return s;
+}
+function isValidPhone(p) { return /^\d{10}$/.test(p); }
+
+function normalizeHeaders(headers) {
+  // Map common header variations to standard field names
+  const map = {
+    'nombre': 'nombre', 'name': 'nombre', 'cliente': 'nombre', 'deudor': 'nombre', 'nombre_completo': 'nombre', 'nombre completo': 'nombre',
+    'telefono': 'telefono', 'teléfono': 'telefono', 'tel': 'telefono', 'phone': 'telefono', 'celular': 'telefono', 'cel': 'telefono', 'movil': 'telefono', 'móvil': 'telefono', 'numero': 'telefono', 'número': 'telefono',
+    'saldo': 'saldo', 'monto': 'saldo', 'adeudo': 'saldo', 'deuda': 'saldo', 'amount': 'saldo', 'balance': 'saldo',
+    'diasatraso': 'diasAtraso', 'dias_atraso': 'diasAtraso', 'dias atraso': 'diasAtraso', 'dias': 'diasAtraso', 'atraso': 'diasAtraso', 'days': 'diasAtraso',
+    'promotor': 'promotor', 'vendedor': 'promotor', 'asesor_venta': 'promotor',
+    'cobrador': 'cobrador', 'collector': 'cobrador', 'gestor': 'cobrador',
+    'referencia': 'referencia', 'ref': 'referencia', 'credito': 'referencia', 'crédito': 'referencia', 'no_credito': 'referencia', 'folio': 'referencia',
+    'notas': 'notas', 'nota': 'notas', 'notes': 'notas', 'comentario': 'notas', 'observaciones': 'notas',
+  };
+  return headers.map(h => {
+    const key = String(h).toLowerCase().trim().replace(/[áéíóú]/g, m => ({á:'a',é:'e',í:'i',ó:'o',ú:'u'})[m]);
+    return map[key] || String(h).trim();
+  });
+}
+
+function rowsToClients(headers, rows) {
+  const nh = normalizeHeaders(headers);
+  return rows.map(row => {
+    const obj = {};
+    nh.forEach((h, i) => { if (row[i] !== undefined && row[i] !== '') obj[h] = String(row[i]).trim(); });
+    if (obj.telefono) obj.telefono = cleanPhone(obj.telefono);
+    return obj;
+  }).filter(o => o.nombre || o.telefono); // at least one field
+}
+
+function handleFile(file) {
+  if (!file) return;
+  log(`📁 Cargando: ${file.name} (${(file.size/1024).toFixed(1)} KB)`, 'info');
+
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  if (ext === 'csv' || ext === 'tsv') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target.result;
+      const sep = ext === 'tsv' ? '\t' : (text.includes('\t') ? '\t' : ',');
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { log('❌ Archivo vacío o sin datos', 'error'); return; }
+      const headers = lines[0].split(sep).map(h => h.replace(/^["']|["']$/g, ''));
+      const rows = lines.slice(1).map(l => {
+        // Handle CSV with quotes
+        if (sep === ',' && l.includes('"')) {
+          const result = []; let current = ''; let inQuotes = false;
+          for (const ch of l) {
+            if (ch === '"') inQuotes = !inQuotes;
+            else if (ch === ',' && !inQuotes) { result.push(current); current = ''; }
+            else current += ch;
+          }
+          result.push(current);
+          return result;
+        }
+        return l.split(sep).map(c => c.replace(/^["']|["']$/g, ''));
+      });
+      // Skip description row if present
+      const dataRows = (rows[0] && rows[0][0] && rows[0][0].startsWith('Nombre completo')) ? rows.slice(1) : rows;
+      loadedClients = rowsToClients(headers, dataRows);
+      showPreview();
+    };
+    reader.readAsText(file, 'UTF-8');
+  } else {
+    // XLSX / XLS
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (data.length < 2) { log('❌ Archivo vacío', 'error'); return; }
+        // Find header row (skip description rows)
+        let headerIdx = 0;
+        const headers = data[headerIdx].map(String);
+        let dataStart = headerIdx + 1;
+        // If row 2 looks like descriptions (all text, no phone numbers), skip it
+        if (data[dataStart]) {
+          const row2 = data[dataStart].map(String);
+          const hasPhone = row2.some(c => /^\d{10,}$/.test(c.replace(/\D/g,'')));
+          if (!hasPhone && row2.some(c => c.length > 20)) dataStart++;
+        }
+        loadedClients = rowsToClients(headers, data.slice(dataStart));
+        showPreview();
+      } catch(err) { log('❌ Error leyendo archivo: ' + err.message, 'error'); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function parsePaste() {
+  const text = document.getElementById('pasteArea').value.trim();
+  if (!text) { log('⚠️ Pega datos primero', 'warn'); return; }
+  const sep = text.includes('\t') ? '\t' : ',';
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) { log('⚠️ Necesitas encabezados + al menos 1 fila', 'warn'); return; }
+  const headers = lines[0].split(sep);
+  const rows = lines.slice(1).map(l => l.split(sep));
+  loadedClients = rowsToClients(headers, rows);
+  showPreview();
+}
+
+function parseJSON() {
+  try {
+    const data = JSON.parse(document.getElementById('jsonArea').value);
+    if (!Array.isArray(data) || !data.length) throw new Error('Array vacío');
+    loadedClients = data.map(c => {
+      if (c.telefono) c.telefono = cleanPhone(c.telefono);
+      return c;
+    }).filter(c => c.nombre || c.telefono);
+    showPreview();
+  } catch(e) { log('❌ JSON inválido: ' + e.message, 'error'); }
+}
+
+function showPreview() {
+  if (!loadedClients.length) { log('⚠️ No se encontraron clientes válidos', 'warn'); return; }
+
+  const valid = loadedClients.filter(c => isValidPhone(c.telefono));
+  const invalid = loadedClients.filter(c => !isValidPhone(c.telefono));
+
+  // Summary
+  document.getElementById('previewSummary').innerHTML = `
+    <span class="total">📊 Total: <strong>${loadedClients.length}</strong></span>
+    <span class="good">✅ Tel válido: <strong>${valid.length}</strong></span>
+    ${invalid.length ? `<span class="bad">❌ Tel inválido: <strong>${invalid.length}</strong></span>` : ''}
+    ${loadedClients[0].saldo ? `<span class="total">💰 Saldo total: <strong>$${loadedClients.reduce((s,c) => s + (parseFloat(c.saldo)||0), 0).toLocaleString()}</strong></span>` : ''}
+  `;
+
+  // Table headers
+  const cols = ['#', 'nombre', 'telefono', 'saldo', 'diasAtraso', 'promotor', 'cobrador', 'referencia'];
+  const colLabels = ['#', 'Nombre', 'Teléfono', 'Saldo', 'Días', 'Promotor', 'Cobrador', 'Ref'];
+  document.getElementById('previewHead').innerHTML = '<tr>' + colLabels.map(c => `<th>${c}</th>`).join('') + '</tr>';
+
+  // Table body (show first 100 rows max in preview)
+  const show = loadedClients.slice(0, 100);
+  document.getElementById('previewBody').innerHTML = show.map((c, i) => {
+    const telClass = isValidPhone(c.telefono) ? 'tel-ok' : 'tel-bad';
+    return `<tr>
+      <td class="row-num">${i+1}</td>
+      <td>${c.nombre || '-'}</td>
+      <td class="${telClass}">${c.telefono || '⚠️ FALTA'}</td>
+      <td>${c.saldo ? '$'+Number(c.saldo).toLocaleString() : '-'}</td>
+      <td>${c.diasAtraso || '-'}</td>
+      <td>${c.promotor || '-'}</td>
+      <td>${c.cobrador || '-'}</td>
+      <td>${c.referencia || '-'}</td>
+    </tr>`;
+  }).join('') + (loadedClients.length > 100 ? `<tr><td colspan="8" style="text-align:center;color:#ff9800;">... y ${loadedClients.length - 100} más</td></tr>` : '');
+
+  document.getElementById('previewSection').classList.remove('hidden');
+  log(`✅ ${loadedClients.length} clientes cargados (${valid.length} con teléfono válido)`, 'success');
+  if (invalid.length) log(`⚠️ ${invalid.length} con teléfono inválido — serán omitidos`, 'warn');
+}
+
+function clearPreview() {
+  loadedClients = [];
+  document.getElementById('previewSection').classList.add('hidden');
+  document.getElementById('campaignProgress').classList.add('hidden');
+  document.getElementById('fileInput').value = '';
+  log('🗑️ Datos limpiados', 'info');
+}
+
+// ============ DRAG & DROP ============
+const dz = document.getElementById('dropZone');
+if (dz) {
+  ['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('dragover'); }));
+  dz.addEventListener('drop', ev => { if(ev.dataTransfer.files.length) handleFile(ev.dataTransfer.files[0]); });
+}
+
+// ============ CAMPAIGN ============
+function badge(r) {
+  if (!r || r==='pendiente') return 'badge-pending';
+  if (r==='llamando') return 'badge-llamando';
+  if (r.includes('pago') && !r.includes('promesa')) return 'badge-pago';
+  if (r.includes('promesa')) return 'badge-promesa';
+  if (r.includes('asesor')) return 'badge-asesor';
+  if (r.includes('contactado')) return 'badge-contactado';
+  if (r.includes('no_contesto')||r.includes('sin_resp')||r.includes('timeout')) return 'badge-no-contesto';
+  return 'badge-error';
+}
+
+async function startCampaign() {
+  // Filter only valid phones
+  const clients = loadedClients.filter(c => isValidPhone(c.telefono));
+  if (!clients.length) { log('❌ No hay clientes con teléfono válido', 'error'); return; }
+
+  const delay = parseInt(document.getElementById('campaignDelay').value) || 45;
+  log(`🚀 Campaña: ${clients.length} clientes, ${delay}s entre llamadas`, 'info');
+
+  try {
+    const res = await fetch(api('/api/campaign'), {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ clients, delaySeconds: delay })
+    });
+    const data = await res.json();
+    if (data.campaignId) {
+      campaignId = data.campaignId;
+      log(`✅ Campaña ${data.campaignId} iniciada`, 'success');
+      document.getElementById('btnStart').disabled = true;
+      document.getElementById('btnCancel').disabled = false;
+      document.getElementById('campaignProgress').classList.remove('hidden');
+      poller = setInterval(poll, 5000);
+      poll();
+    } else log('❌ '+JSON.stringify(data), 'error');
+  } catch(e) { log('❌ '+e.message, 'error'); }
+}
+
+async function cancelCampaign() {
+  if (!campaignId) return;
+  await fetch(api(`/api/campaign/${campaignId}/cancel`), {method:'POST'});
+  log('⛔ Campaña cancelada', 'warn');
+  stopPoll();
+}
+
+async function poll() {
+  if (!campaignId) return;
+  try {
+    const d = await (await fetch(api(`/api/campaign/${campaignId}`))).json();
+    let ok=0, no=0, pend=0;
+    (d.clients||[]).forEach(c => {
+      if (c.resultado==='pendiente'||c.resultado==='llamando') pend++;
+      else if (['pago','promesa_pago','asesor','contactado_sin_seleccion'].includes(c.resultado)) ok++;
+      else no++;
+    });
+    const total = d.total || 1;
+    const completed = (d.completed || 0);
+    const pct = Math.round(completed / total * 100);
+
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statContestadas').textContent = ok;
+    document.getElementById('statPendientes').textContent = pend;
+    document.getElementById('statNoContesto').textContent = no;
+    document.getElementById('progressText').textContent = `${completed}/${total} procesados`;
+    document.getElementById('progressPct').textContent = pct + '%';
+    document.getElementById('progressFill').style.width = pct + '%';
+
+    document.getElementById('campaignResults').innerHTML = (d.clients||[]).map((c,i) =>
+      `<tr><td style="color:#556677">${i+1}</td><td>${c.nombre||'-'}</td><td>${c.telefono||'-'}</td><td>$${c.saldo||'-'}</td><td><span class="badge ${badge(c.resultado)}">${c.resultado||'pendiente'}</span></td></tr>`
+    ).join('');
+
+    if (completed >= total || d.cancelled) {
+      log(`📊 Campaña finalizada: ${ok} contactados, ${no} sin respuesta de ${total}`, d.cancelled?'warn':'success');
+      stopPoll();
+    }
+  } catch(e) {}
+}
+
+function stopPoll() {
+  if (poller) { clearInterval(poller); poller=null; }
+  campaignId = null;
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnCancel').disabled = true;
+}
+
+// ============ CONFIG & BALANCE ============
 async function loadConfig() {
   try {
     const d = await (await fetch(api('/api/config'))).json();
-    const el = document.getElementById('configDisplay');
-    el.innerHTML = [
+    document.getElementById('configDisplay').innerHTML = [
       ['API Zadarma', d.zadarma?.configured ? '✅ OK' : '❌', d.zadarma?.configured ? 'ok' : 'err'],
       ['Extensión', d.zadarma?.sip || '-', ''],
       ['CallerID', d.zadarma?.callerId || '-', ''],
       ['Escenario', d.zadarma?.scenario || '-', ''],
-      ['GAS', d.gas?.configured ? '✅ OK' : '❌ Sin config', d.gas?.configured ? 'ok' : 'err'],
+      ['GAS', d.gas?.configured ? '✅ OK' : '❌', d.gas?.configured ? 'ok' : 'err'],
       ['Webhook', d.webhookUrl ? '✅' : '❌', d.webhookUrl ? 'ok' : 'err'],
     ].map(([k,v,c]) => `<div class="config-item"><span class="key">${k}</span><span class="val ${c}">${v}</span></div>`).join('');
-    document.getElementById('serverStatus').innerHTML = '<span class="status-ok">🟢 Online</span>';
+    document.getElementById('serverStatus').innerHTML = '<span style="color:#4caf50">🟢 Online</span>';
     log('Config cargada', 'success');
   } catch(e) {
-    document.getElementById('serverStatus').innerHTML = '<span class="status-err">🔴 Error</span>';
+    document.getElementById('serverStatus').innerHTML = '<span style="color:#e53935">🔴 Error</span>';
     log('Error config: '+e.message, 'error');
   }
 }
@@ -226,91 +592,26 @@ async function testCall() {
   log(`📞 Llamando a ${nombre} (${phone})...`, 'info');
   try {
     const d = await (await fetch(api('/api/test-call'), {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({phone, nombre, saldo})
     })).json();
     if (d.success) log(`✅ Llamada enviada a ${phone}`, 'success');
-    else log(`❌ ${d.result?.message || JSON.stringify(d)}`, 'error');
+    else log(`❌ ${d.result?.message||JSON.stringify(d)}`, 'error');
   } catch(e) { log('❌ '+e.message, 'error'); }
-}
-
-async function startCampaign() {
-  let clients;
-  try { clients = JSON.parse(document.getElementById('campaignClients').value); }
-  catch(e) { log('❌ JSON inválido', 'error'); return; }
-  if (!Array.isArray(clients)||!clients.length) { log('❌ Array vacío', 'error'); return; }
-  const delay = parseInt(document.getElementById('campaignDelay').value) || 45;
-  log(`🚀 Campaña: ${clients.length} clientes, ${delay}s delay`, 'info');
-  try {
-    const d = await (await fetch(api('/api/campaign'), {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({clients, delaySeconds: delay})
-    })).json();
-    if (d.campaignId) {
-      campaignId = d.campaignId;
-      log(`✅ Campaña ${d.campaignId} iniciada`, 'success');
-      document.getElementById('btnStart').disabled = true;
-      document.getElementById('btnCancel').disabled = false;
-      poller = setInterval(poll, 5000);
-      poll();
-    } else log('❌ '+JSON.stringify(d), 'error');
-  } catch(e) { log('❌ '+e.message, 'error'); }
-}
-
-async function cancelCampaign() {
-  if (!campaignId) return;
-  await fetch(api(`/api/campaign/${campaignId}/cancel`), {method:'POST'});
-  log(`⛔ Campaña cancelada`, 'warn');
-  stopPoll();
-}
-
-async function poll() {
-  if (!campaignId) return;
-  try {
-    const d = await (await fetch(api(`/api/campaign/${campaignId}`))).json();
-    let ok=0, no=0, pend=0;
-    (d.clients||[]).forEach(c => {
-      if (c.resultado==='pendiente') pend++;
-      else if (['pago','promesa_pago','asesor','contactado_sin_seleccion'].includes(c.resultado)) ok++;
-      else no++;
-    });
-    document.getElementById('statTotal').textContent = d.total||0;
-    document.getElementById('statContestadas').textContent = ok;
-    document.getElementById('statPendientes').textContent = pend;
-    document.getElementById('statNoContesto').textContent = no;
-    document.getElementById('campaignResults').innerHTML = (d.clients||[]).map(c =>
-      `<tr><td>${c.nombre||'-'}</td><td>${c.telefono||'-'}</td><td>$${c.saldo||'-'}</td><td><span class="badge ${badge(c.resultado)}">${c.resultado||'pendiente'}</span></td></tr>`
-    ).join('');
-    if (d.completed >= d.total || d.cancelled) {
-      log(`📊 Fin: ${ok} contactados, ${no} sin respuesta`, d.cancelled?'warn':'success');
-      stopPoll();
-    }
-  } catch(e) {}
-}
-
-function stopPoll() {
-  if (poller) { clearInterval(poller); poller=null; }
-  campaignId = null;
-  document.getElementById('btnStart').disabled = false;
-  document.getElementById('btnCancel').disabled = true;
 }
 
 function clearLog() { document.getElementById('logContainer').innerHTML=''; }
 
 function init() { loadConfig(); loadBalance(); log('Panel inicializado ✅', 'success'); }
 
+// ============ AUTO LOGIN ============
 window.addEventListener('DOMContentLoaded', () => {
   const u = new URLSearchParams(window.location.search).get('api_key');
   const s = localStorage.getItem('lgx_key');
   const k = u || s;
   if (k) {
     KEY = k;
-    fetch(api('/api/config')).then(r => {
-      if (!r.ok) throw 0;
-      return r.json();
-    }).then(() => {
+    fetch(api('/api/config')).then(r => { if(!r.ok) throw 0; return r.json(); }).then(() => {
       document.getElementById('loginOverlay').classList.add('hidden');
       document.getElementById('mainApp').classList.remove('hidden');
       localStorage.setItem('lgx_key', KEY);
