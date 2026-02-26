@@ -120,20 +120,24 @@ const phoneToCall = new Map();       // key: phone → callData (lookup rápido)
 async function makeCall(phone, campaignId, index, clientData) {
   let cleanPhone = (phone || '').replace(/\D/g, '');
 
-  // Formato para México: necesita 10 dígitos
-  if (cleanPhone.startsWith('52') && cleanPhone.length === 12) {
-    cleanPhone = cleanPhone.substring(2);
+  // Formato internacional para México: debe ser 52 + 10 dígitos
+  if (cleanPhone.length === 10) {
+    cleanPhone = '52' + cleanPhone;  // Agregar código de país
+  } else if (cleanPhone.startsWith('52') && cleanPhone.length === 12) {
+    // Ya tiene formato correcto
+  } else if (cleanPhone.startsWith('+52')) {
+    cleanPhone = cleanPhone.substring(1); // quitar +
+  } else if (cleanPhone.startsWith('+')) {
+    cleanPhone = cleanPhone.substring(1); // quitar + de otros países
   }
-  if (cleanPhone.startsWith('+52')) cleanPhone = cleanPhone.substring(3);
-  if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
 
   // callback con predicted: llama al cliente primero,
   // cuando contesta lo conecta al "from" (escenario IVR)
   const params = {
-    from: ZADARMA_SCENARIO,   // Escenario PBX con IVR
+    from: ZADARMA_SCENARIO,   // Escenario PBX con IVR (formato 0-1)
     to: cleanPhone,
     sip: ZADARMA_SIP,         // Extensión para CallerID y estadísticas
-    predicted: 'true'         // Llama primero al "to", luego conecta a "from"
+    predicted: 'predicted'    // String 'predicted' según docs y npm example
   };
 
   console.log(`📞 [${campaignId}] #${index} Llamando ${clientData.nombre} → ${cleanPhone}`);
