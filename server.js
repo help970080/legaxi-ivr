@@ -76,6 +76,10 @@ function zadarmaRequest(method, params = {}) {
     const urlPath = httpMethod === 'GET' && paramsStr ? `${method}?${paramsStr}` : method;
 
     console.log(`   🔑 API ${httpMethod} ${method}`);
+    console.log(`   📦 paramsStr: ${paramsStr}`);
+    console.log(`   📦 signData: ${data}`);
+    console.log(`   📦 signature: ${signature}`);
+    console.log(`   📦 auth: ${authHeader}`);
 
     const options = {
       hostname: 'api.zadarma.com',
@@ -654,37 +658,100 @@ app.get('/api/debug-call', auth, async (req, res) => {
   try {
     const phone = (req.query.phone || '5544621100').replace(/\D/g, '').slice(-10);
     
-    const tests = [];
+    // Probar manualmente con https nativo mostrando TODO
+    const params = { from: '100', to: phone, sip: '100', predicted: 'predicted' };
+    const method = '/v1/request/callback/';
     
-    // Test 1: from=scenario, to=10dig, predicted
-    tests.push({ label: 'scenario_10dig', params: { from: ZADARMA_SCENARIO, to: phone, sip: '100', predicted: 'predicted' }});
+    // Paso 1: Ordenar params
+    const sortedKeys = Object.keys(params).sort();
+    const pairs = sortedKeys.map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`);
+    const paramsStr = pairs.join('&');
     
-    // Test 2: from=ext100, to=10dig, predicted  
-    tests.push({ label: 'ext100_10dig', params: { from: '100', to: phone, sip: '100', predicted: 'predicted' }});
+    // Paso 2: Firma
+    const md5 = crypto.createHash('md5').update(paramsStr).digest('hex');
+    const signData = method + paramsStr + md5;
+    const sha1hex = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signData).digest('hex');
+    const signature = Buffer.from(sha1hex).toString('base64');
+    const authHeader = `${ZADARMA_API_KEY}:${signature}`;
     
-    // Test 3: from=scenario, to=52+10dig, predicted
-    tests.push({ label: 'scenario_intl', params: { from: ZADARMA_SCENARIO, to: '52' + phone, sip: '100', predicted: 'predicted' }});
+    const debug = {
+      params, paramsStr, md5, signData, sha1hex, signature, authHeader,
+      sorted_keys: sortedKeys
+    };
     
-    // Test 4: from=ext100, to=52+10dig, predicted
-    tests.push({ label: 'ext100_intl', params: { from: '100', to: '52' + phone, sip: '100', predicted: 'predicted' }});
+    // Test A: POST con body (nuestro método actual)
+    const testA = await new Promise((resolve) => {
+      const options = {
+        hostname: 'api.zadarma.com',
+        path: method,
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(paramsStr)
+        }
+      };
+      const r = https.request(options, (resp) => {
+        let body = '';
+        resp.on('data', c => body += c);
+        resp.on('end', () => {
+          try { resolve({ label: 'POST_body', statusCode: resp.statusCode, body: JSON.parse(body) }); }
+          catch(e) { resolve({ label: 'POST_body', statusCode: resp.statusCode, raw: body }); }
+        });
+      });
+      r.on('error', e => resolve({ label: 'POST_body', error: e.message }));
+      r.write(paramsStr);
+      r.end();
+    });
     
-    // Test 5: simple from=ext, to=10dig, NO predicted
-    tests.push({ label: 'simple_no_predicted', params: { from: '100', to: phone }});
+    // Test B: GET con query string (misma firma)
+    const testB = await new Promise((resolve) => {
+      const options = {
+        hostname: 'api.zadarma.com',
+        path: `${method}?${paramsStr}`,
+        method: 'GET',
+        headers: {
+          'Authorization': authHeader
+        }
+      };
+      const r = https.request(options, (resp) => {
+        let body = '';
+        resp.on('data', c => body += c);
+        resp.on('end', () => {
+          try { resolve({ label: 'GET_query', statusCode: resp.statusCode, body: JSON.parse(body) }); }
+          catch(e) { resolve({ label: 'GET_query', statusCode: resp.statusCode, raw: body }); }
+        });
+      });
+      r.on('error', e => resolve({ label: 'GET_query', error: e.message }));
+      r.end();
+    });
     
-    // Test 6: from=scenario, to=10dig, predicted=true
-    tests.push({ label: 'scenario_true', params: { from: ZADARMA_SCENARIO, to: phone, sip: '100', predicted: 'true' }});
-    
-    const results = [];
-    for (const t of tests) {
-      const r = await zadarmaRequest('/v1/request/callback/', t.params);
-      results.push({ label: t.label, params: t.params, result: r });
-      if (r.status === 'success') break;
-      await new Promise(ok => setTimeout(ok, 500));
-    }
-    
-    res.json({ scenario: ZADARMA_SCENARIO, sip: ZADARMA_SIP, callerId: ZADARMA_CALLER_ID, tests: results });
+    // Test C: POST con params en URL también (como hace axios por default)
+    const testC = await new Promise((resolve) => {
+      const options = {
+        hostname: 'api.zadarma.com',
+        path: method,
+        method: 'POST',
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      };
+      const r = https.request(options, (resp) => {
+        let body = '';
+        resp.on('data', c => body += c);
+        resp.on('end', () => {
+          try { resolve({ label: 'POST_no_body', statusCode: resp.statusCode, body: JSON.parse(body) }); }
+          catch(e) { resolve({ label: 'POST_no_body', statusCode: resp.statusCode, raw: body }); }
+        });
+      });
+      r.on('error', e => resolve({ label: 'POST_no_body', error: e.message }));
+      r.end();  // sin write - sin body
+    });
+
+    res.json({ debug, tests: [testA, testB, testC] });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
