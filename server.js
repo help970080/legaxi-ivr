@@ -44,9 +44,9 @@ function auth(req, res, next) {
   next();
 }
 
-// ---- ZADARMA API (implementación nativa - el paquete npm tiene bug en la firma) ----
-// Bug en npm zadarma: hace digest('hex') → base64(hexString)
-// Correcto (como PHP): hash_hmac('sha1', data, secret, true) → base64(binaryHash)
+// ---- ZADARMA API (implementación nativa) ----
+// Firma Zadarma: HMAC-SHA1 → hex string → base64 (NO binary→base64)
+// El paquete npm zadarma usa este mismo método y ES correcto para Zadarma
 
 function zadarmaRequest(method, params = {}) {
   return new Promise((resolve, reject) => {
@@ -65,10 +65,11 @@ function zadarmaRequest(method, params = {}) {
     const md5 = crypto.createHash('md5').update(paramsStr).digest('hex');
     const data = method + paramsStr + md5;
 
-    // HMAC-SHA1 → binary → base64 (como PHP con raw_output=true)
-    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET)
+    // HMAC-SHA1 → hex string → base64 (así lo espera Zadarma)
+    const sha1hex = crypto.createHmac('sha1', ZADARMA_API_SECRET)
       .update(data)
-      .digest('base64');  // directo a base64 del binary, NO hex→base64
+      .digest('hex');
+    const signature = Buffer.from(sha1hex).toString('base64');
 
     const authHeader = `${ZADARMA_API_KEY}:${signature}`;
     const httpMethod = Object.keys(params).length > 0 ? 'POST' : 'GET';
@@ -683,7 +684,7 @@ app.get('/api/debug-auth', auth, async (req, res) => {
     const paramsStr = '';
     const md5 = crypto.createHash('md5').update(paramsStr).digest('hex');
     const signData = method + paramsStr + md5;
-    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signData).digest('base64');
+    const signature = Buffer.from(crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signData).digest('hex')).toString('base64');
 
     const signatureDebug = {
       method,
@@ -697,7 +698,7 @@ app.get('/api/debug-auth', auth, async (req, res) => {
     // Test con las keys limpias (trim)
     const cleanKey = ZADARMA_API_KEY.trim().replace(/[^\x20-\x7E]/g, '');
     const cleanSecret = ZADARMA_API_SECRET.trim().replace(/[^\x20-\x7E]/g, '');
-    const cleanSig = crypto.createHmac('sha1', cleanSecret).update(signData).digest('base64');
+    const cleanSig = Buffer.from(crypto.createHmac('sha1', cleanSecret).update(signData).digest('hex')).toString('base64');
 
     const cleanTest = {
       key_cleaned: cleanKey !== ZADARMA_API_KEY,
