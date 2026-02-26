@@ -669,6 +669,31 @@ app.get('/health', (req, res) => {
   });
 });
 
+// --- DEBUG API AUTH ---
+app.get('/api/debug-auth', auth, async (req, res) => {
+  try {
+    // Mostrar info de keys (parcial por seguridad)
+    const keyInfo = {
+      key_length: ZADARMA_API_KEY.length,
+      key_preview: ZADARMA_API_KEY.substring(0, 6) + '...' + ZADARMA_API_KEY.slice(-4),
+      secret_length: ZADARMA_API_SECRET.length,
+      secret_preview: ZADARMA_API_SECRET.substring(0, 6) + '...' + ZADARMA_API_SECRET.slice(-4),
+      key_has_spaces: ZADARMA_API_KEY !== ZADARMA_API_KEY.trim(),
+      secret_has_spaces: ZADARMA_API_SECRET !== ZADARMA_API_SECRET.trim(),
+    };
+
+    // Test simple: balance
+    const result = await zadarmaRequest('/v1/info/balance/');
+
+    res.json({
+      keyInfo,
+      balanceTest: result
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- ROOT ---
 app.get('/', (req, res) => {
   res.json({
