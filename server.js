@@ -1,6 +1,6 @@
 // ============================================================
-// LeGaXi IVR v5.0 - ZADARMA API
-// Llamadas automáticas con IVR de centralita
+// LeGaXi IVR v6.0 - ZADARMA WEBHOOK IVR
+// Llamadas salientes con IVR dinámico controlado por webhook
 // Deploy: Render.com (Docker)
 // ============================================================
 const express = require('express');
@@ -17,8 +17,10 @@ app.use(express.urlencoded({ extended: true }));
 const {
   ZADARMA_API_KEY = '',
   ZADARMA_API_SECRET = '',
-  ZADARMA_SIP = '681294',
+  ZADARMA_SIP = '100',              // Extensión PBX (no SIP directo)
   ZADARMA_CALLER_ID = '+525598160911',
+  ZADARMA_SCENARIO = '0-1',         // Escenario PBX formato menu-scenario
+  IVR_FILE_ID = '',                  // ID del archivo de audio IVR (se obtiene de Zadarma)
   WHATSAPP_NUMBER = '5544621100',
   GAS_WEBHOOK_URL,
   SERVER_URL = 'https://legaxi-ivr.onrender.com',
@@ -42,7 +44,7 @@ function auth(req, res, next) {
   next();
 }
 
-// ---- ZADARMA API (using official library) ----
+// ---- ZADARMA API ----
 const { api: z_api } = require('zadarma');
 
 function zadarmaRequest(method, params = {}) {
@@ -54,88 +56,265 @@ function zadarmaRequest(method, params = {}) {
   });
 }
 
-// ---- CAMPAIGNS & CALLS ----
+// ---- STORAGE ----
 const campaigns = new Map();
-const activeCalls = new Map();
+const activeCalls = new Map();       // key: pbx_call_id → callData
+const phoneToCall = new Map();       // key: phone → callData (lookup rápido)
 
 // ============================================================
-// HACER LLAMADA - callback predicted (deudor escucha IVR)
+// HACER LLAMADA SALIENTE
+// Usa callback con predicted + from=escenario PBX
+// El cliente contesta → entra al IVR de la centralita
+// Nuestro webhook controla qué escucha
 // ============================================================
 async function makeCall(phone, campaignId, index, clientData) {
   let cleanPhone = (phone || '').replace(/\D/g, '');
-  // Quitar prefijo 52 - la centralita lo agrega
-  if (cleanPhone.startsWith('52') && cleanPhone.length === 12) cleanPhone = cleanPhone.substring(2);
+
+  // Formato para México: necesita 10 dígitos
+  if (cleanPhone.startsWith('52') && cleanPhone.length === 12) {
+    cleanPhone = cleanPhone.substring(2);
+  }
   if (cleanPhone.startsWith('+52')) cleanPhone = cleanPhone.substring(3);
   if (cleanPhone.startsWith('+')) cleanPhone = cleanPhone.substring(1);
 
+  // callback con predicted: llama al cliente primero,
+  // cuando contesta lo conecta al "from" (escenario IVR)
   const params = {
-    from: ZADARMA_SIP,
-    predicted: 'predicted',
-    sip: ZADARMA_SIP,
-    to: cleanPhone
+    from: ZADARMA_SCENARIO,   // Escenario PBX con IVR
+    to: cleanPhone,
+    sip: ZADARMA_SIP,         // Extensión para CallerID y estadísticas
+    predicted: 'true'         // Llama primero al "to", luego conecta a "from"
   };
 
   console.log(`📞 [${campaignId}] #${index} Llamando ${clientData.nombre} → ${cleanPhone}`);
-  const result = await zadarmaRequest('/v1/request/callback/', params);
+  console.log(`   📋 Params: from=${params.from} to=${params.to} sip=${params.sip} predicted`);
 
-  if (result.status === 'success') {
-    activeCalls.set(`${campaignId}-${index}`, {
-      campaignId, index, phone: cleanPhone,
-      nombre: clientData.nombre, startTime: Date.now(),
-      ...clientData
-    });
-    console.log(`   ✅ Llamada enviada`);
-  } else {
-    console.log(`   ❌ Error: ${JSON.stringify(result)}`);
-    logResult(campaignId, index, null, 'error_api');
+  try {
+    const result = await zadarmaRequest('/v1/request/callback/', params);
+
+    if (result.status === 'success') {
+      const callInfo = {
+        campaignId, index, phone: cleanPhone,
+        nombre: clientData.nombre,
+        saldo: clientData.saldo || '',
+        diasAtraso: clientData.diasAtraso || '',
+        promotor: clientData.promotor || '',
+        cobrador: clientData.cobrador || '',
+        startTime: Date.now(),
+        resultado: 'pendiente',
+        dtmf: null,
+        logged: false
+      };
+
+      // Guardamos por teléfono para match con webhooks
+      phoneToCall.set(cleanPhone, callInfo);
+      // También guardamos las últimas 4-6 cifras por si el caller_id viene parcial
+      if (cleanPhone.length >= 10) {
+        phoneToCall.set(cleanPhone.slice(-10), callInfo);
+      }
+
+      console.log(`   ✅ Callback enviado exitosamente`);
+      return { success: true, result };
+    } else {
+      console.log(`   ❌ Error API: ${JSON.stringify(result)}`);
+      logResult(campaignId, index, null, 'error_api', clientData);
+      return { success: false, result };
+    }
+  } catch (err) {
+    console.error(`   ❌ Exception: ${err.message}`);
+    logResult(campaignId, index, null, 'error_exception', clientData);
+    return { success: false, error: err.message };
   }
-  return result;
 }
 
 // ============================================================
-// ZADARMA WEBHOOKS
+// BUSCAR LLAMADA ACTIVA por caller_id o destination
+// ============================================================
+function findCallByPhone(phoneHint) {
+  if (!phoneHint) return null;
+  const clean = phoneHint.replace(/\D/g, '');
+
+  // Búsqueda directa
+  if (phoneToCall.has(clean)) return phoneToCall.get(clean);
+
+  // Búsqueda por últimos 10 dígitos
+  const last10 = clean.slice(-10);
+  if (phoneToCall.has(last10)) return phoneToCall.get(last10);
+
+  // Búsqueda parcial
+  for (const [key, call] of phoneToCall) {
+    if (key.includes(clean) || clean.includes(key)) return call;
+  }
+
+  return null;
+}
+
+// ============================================================
+// ZADARMA WEBHOOKS - EL CORAZÓN DEL IVR
 // ============================================================
 app.post('/zadarma', (req, res) => {
   const event = req.body.event;
-  console.log(`📨 Webhook: ${event}`, JSON.stringify(req.body).substring(0, 500));
+  const timestamp = new Date().toISOString().substring(11, 19);
+  console.log(`\n📨 [${timestamp}] Webhook: ${event}`);
+  console.log(`   Body: ${JSON.stringify(req.body).substring(0, 600)}`);
 
-  if (event === 'NOTIFY_OUT_START') {
-    const dest = req.body.destination;
-    console.log(`   📱 Deudor contestó: ${dest}`);
+  // --------------------------------------------------------
+  // NOTIFY_START - Inicio de llamada entrante a PBX
+  // Cuando el cliente contesta (predicted), la llamada
+  // entra a la PBX y recibimos este evento.
+  // Respondemos con IVR: reproducir audio + esperar DTMF
+  // --------------------------------------------------------
+  if (event === 'NOTIFY_START') {
+    const callerId = req.body.caller_id;
+    const calledDid = req.body.called_did;
+    const pbxCallId = req.body.pbx_call_id;
+
+    console.log(`   📱 Llamada iniciada: caller=${callerId} did=${calledDid} pbx_id=${pbxCallId}`);
+
+    const call = findCallByPhone(callerId);
+    if (call) {
+      call.pbxCallId = pbxCallId;
+      activeCalls.set(pbxCallId, call);
+      console.log(`   🔗 Match encontrado: ${call.nombre} (${call.phone})`);
+    } else {
+      console.log(`   ⚠️ Sin match para ${callerId} - puede ser llamada entrante directa`);
+    }
+
+    // RESPUESTA IVR: Reproducir audio del menú y esperar DTMF
+    const ivrResponse = buildIvrResponse(call);
+    console.log(`   🔊 Respuesta IVR: ${JSON.stringify(ivrResponse)}`);
+
+    res.set('Content-Type', 'application/json');
+    return res.json(ivrResponse);
   }
 
+  // --------------------------------------------------------
+  // NOTIFY_IVR - El cliente presionó una tecla DTMF
+  // Procesamos la selección del menú
+  // --------------------------------------------------------
+  if (event === 'NOTIFY_IVR') {
+    const pbxCallId = req.body.pbx_call_id;
+    const callerId = req.body.caller_id;
+
+    // Extraer DTMF de la estructura wait_dtmf
+    let dtmf = null;
+    if (req.body.wait_dtmf) {
+      dtmf = req.body.wait_dtmf.digits;
+    } else if (req.body.dtmf) {
+      dtmf = req.body.dtmf;
+    }
+
+    console.log(`   🔢 IVR: DTMF="${dtmf}" caller=${callerId} pbx_id=${pbxCallId}`);
+
+    const call = activeCalls.get(pbxCallId) || findCallByPhone(callerId);
+
+    if (dtmf && call && !call.logged) {
+      call.dtmf = dtmf;
+
+      switch (dtmf) {
+        case '1': // PAGAR
+          console.log(`   💰 ${call.nombre} seleccionó PAGAR`);
+          logResult(call.campaignId, call.index, 'pago', 'contestó', call);
+
+          // Responder: mensaje de confirmación y colgar
+          // O redirigir a extensión de asesor
+          res.set('Content-Type', 'application/json');
+          return res.json({
+            ivr_saypopular: 17,  // "Thank you" / usar número de frase popular
+            language: 'es',
+            hangup: 1
+          });
+
+        case '2': // PROMESA DE PAGO
+          console.log(`   📅 ${call.nombre} seleccionó PROMESA DE PAGO`);
+          logResult(call.campaignId, call.index, 'promesa_pago', 'contestó', call);
+
+          res.set('Content-Type', 'application/json');
+          return res.json({
+            hangup: 1
+          });
+
+        case '3': // HABLAR CON ASESOR → redirigir a extensión 100 (MicroSIP)
+          console.log(`   🧑‍💼 ${call.nombre} quiere hablar con ASESOR → Ext 100`);
+          logResult(call.campaignId, call.index, 'asesor', 'contestó', call);
+
+          res.set('Content-Type', 'application/json');
+          return res.json({
+            redirect: ZADARMA_SIP,  // Extensión 100 (MicroSIP)
+            return_timeout: 30      // 30 seg antes de volver al menú
+          });
+
+        default:
+          console.log(`   ❓ Tecla no reconocida: ${dtmf}`);
+          // Repetir el menú
+          const retryResponse = buildIvrResponse(call);
+          res.set('Content-Type', 'application/json');
+          return res.json(retryResponse);
+      }
+    } else if (!dtmf || (req.body.wait_dtmf && req.body.wait_dtmf.default_behaviour)) {
+      // Timeout o sin respuesta - colgar
+      console.log(`   ⏰ Sin respuesta DTMF, colgando`);
+      if (call && !call.logged) {
+        logResult(call.campaignId, call.index, 'sin_respuesta', 'timeout_ivr', call);
+      }
+      res.set('Content-Type', 'application/json');
+      return res.json({ hangup: 1 });
+    }
+
+    return res.json({});
+  }
+
+  // --------------------------------------------------------
+  // NOTIFY_END - Fin de llamada entrante a PBX
+  // --------------------------------------------------------
+  if (event === 'NOTIFY_END') {
+    const pbxCallId = req.body.pbx_call_id;
+    const callerId = req.body.caller_id;
+    const duration = parseInt(req.body.duration) || 0;
+    const disposition = req.body.disposition;
+
+    console.log(`   📴 Fin llamada: caller=${callerId} dur=${duration}s disp=${disposition}`);
+
+    const call = activeCalls.get(pbxCallId) || findCallByPhone(callerId);
+
+    if (call && !call.logged) {
+      const resultado = duration > 0 && disposition === 'answered'
+        ? 'contactado_sin_seleccion'
+        : 'no_contesto';
+      logResult(call.campaignId, call.index, resultado, disposition, call);
+    }
+
+    // Limpiar
+    if (pbxCallId) activeCalls.delete(pbxCallId);
+    if (call) {
+      phoneToCall.delete(call.phone);
+      if (call.phone.length >= 10) phoneToCall.delete(call.phone.slice(-10));
+    }
+  }
+
+  // --------------------------------------------------------
+  // NOTIFY_OUT_START - Inicio llamada saliente
+  // --------------------------------------------------------
+  if (event === 'NOTIFY_OUT_START') {
+    const dest = req.body.destination;
+    const callerId = req.body.caller_id;
+    console.log(`   📤 Saliente iniciada: de=${callerId} a=${dest}`);
+  }
+
+  // --------------------------------------------------------
+  // NOTIFY_OUT_END - Fin llamada saliente
+  // --------------------------------------------------------
   if (event === 'NOTIFY_OUT_END') {
     const dest = req.body.destination;
     const duration = parseInt(req.body.duration) || 0;
     const disposition = req.body.disposition;
-    console.log(`   📴 Fin: ${dest} ${duration}s ${disposition}`);
+    console.log(`   📤 Saliente fin: dest=${dest} dur=${duration}s disp=${disposition}`);
 
-    for (const [key, call] of activeCalls) {
-      if (dest && (dest.includes(call.phone) || call.phone.includes(dest))) {
-        if (!call.logged) {
-          const resultado = disposition === 'answered' && duration > 5 ? 'contactado' : 'no_contesto';
-          logResult(call.campaignId, call.index, null, resultado);
-        }
-        activeCalls.delete(key);
-        break;
-      }
-    }
-  }
-
-  if (event === 'NOTIFY_IVR') {
-    const dtmf = req.body.dtmf;
-    const dest = req.body.called_did || req.body.caller_id || req.body.destination;
-    console.log(`   🔢 IVR DTMF=${dtmf} de ${dest}`);
-
-    let resultado = 'sin_respuesta';
-    if (dtmf === '1') resultado = 'pago';
-    else if (dtmf === '2') resultado = 'promesa_pago';
-    else if (dtmf === '3') resultado = 'asesor';
-
-    for (const [key, call] of activeCalls) {
-      if (dest && (dest.includes(call.phone) || call.phone.includes(dest))) {
-        logResult(call.campaignId, call.index, resultado, null);
-        break;
+    if (duration === 0) {
+      const call = findCallByPhone(dest);
+      if (call && !call.logged) {
+        logResult(call.campaignId, call.index, 'no_contesto', disposition, call);
+        phoneToCall.delete(call.phone);
       }
     }
   }
@@ -143,139 +322,366 @@ app.post('/zadarma', (req, res) => {
   res.json({});
 });
 
+// Zadarma webhook verification (GET con zd_echo)
 app.get('/zadarma', (req, res) => {
-  if (req.query.zd_echo) return res.send(req.query.zd_echo);
-  res.json({ status: 'ok', webhook: 'zadarma' });
+  if (req.query.zd_echo) {
+    console.log(`✅ Zadarma webhook verificado: ${req.query.zd_echo}`);
+    return res.send(req.query.zd_echo);
+  }
+  res.json({ status: 'ok', webhook: 'zadarma', uptime: Math.floor(process.uptime()) });
 });
 
 // ============================================================
-// LOG RESULTADO → GAS
+// CONSTRUIR RESPUESTA IVR
 // ============================================================
-function logResult(campaignId, index, menuValue, callStatus) {
+function buildIvrResponse(call) {
+  // Si tenemos archivo de audio IVR subido a Zadarma, usarlo
+  if (IVR_FILE_ID) {
+    return {
+      ivr_play: IVR_FILE_ID,
+      wait_dtmf: {
+        timeout: 8,
+        attempts: 2,
+        maxsymbols: 1,
+        name: 'menu_cobranza',
+        default_behaviour: 'hangup'
+      }
+    };
+  }
+
+  // Si no hay archivo, usar texto a voz (readtext)
+  // Zadarma puede leer texto automáticamente
+  const nombre = call ? call.nombre : 'estimado cliente';
+  const saldo = call ? call.saldo : '';
+
+  // Construir mensaje personalizado
+  let mensaje = `Estimado ${nombre}. `;
+  if (saldo) {
+    mensaje += `Usted tiene un saldo pendiente de ${saldo} pesos. `;
+  } else {
+    mensaje += `Usted tiene un saldo pendiente con LeGaXi. `;
+  }
+  mensaje += 'Presione 1 para realizar su pago. ';
+  mensaje += 'Presione 2 para agendar una fecha de pago. ';
+  mensaje += 'Presione 3 para hablar con un asesor.';
+
+  return {
+    ivr_saytext: mensaje,
+    language: 'es',
+    wait_dtmf: {
+      timeout: 8,
+      attempts: 2,
+      maxsymbols: 1,
+      name: 'menu_cobranza',
+      default_behaviour: 'hangup'
+    }
+  };
+}
+
+// ============================================================
+// LOG RESULTADO → GOOGLE APPS SCRIPT
+// ============================================================
+function logResult(campaignId, index, menuResult, callStatus, clientData) {
+  // Buscar en campaña si existe
   const camp = campaigns.get(campaignId);
-  if (!camp || index === undefined) return;
-  const cl = camp.clients[index];
-  if (!cl || cl.logged) return;
+  let cl = clientData;
 
-  const resultado = menuValue || callStatus || 'sin_respuesta';
-  cl.resultado = resultado;
-  cl.logged = true;
-  camp.completed = (camp.completed || 0) + 1;
-  console.log(`📊 [${campaignId}] #${index} ${cl.nombre}: ${resultado}`);
+  if (camp && camp.clients[index]) {
+    cl = camp.clients[index];
+    if (cl.logged) return; // Ya logueado
+    cl.logged = true;
+    cl.resultado = menuResult || callStatus || 'sin_respuesta';
+    camp.completed = (camp.completed || 0) + 1;
+  }
 
-  if (GAS_WEBHOOK_URL) {
+  const resultado = menuResult || callStatus || 'sin_respuesta';
+  console.log(`📊 [${campaignId}] #${index} ${cl?.nombre || '?'}: ${resultado}`);
+
+  // Enviar a Google Apps Script
+  if (GAS_WEBHOOK_URL && cl) {
     const payload = JSON.stringify({
       action: 'registrarLlamadaIVR',
-      nombre: cl.nombre, telefono: cl.telefono,
-      saldo: cl.saldo || '', diasAtraso: cl.diasAtraso || '',
-      promotor: cl.promotor || '', resultado,
-      detalle: menuValue ? `IVR: ${menuValue}` : (callStatus || 'Sin respuesta'),
-      cobrador: cl.cobrador || '', campaignId
+      nombre: cl.nombre || '',
+      telefono: cl.telefono || cl.phone || '',
+      saldo: cl.saldo || '',
+      diasAtraso: cl.diasAtraso || '',
+      promotor: cl.promotor || '',
+      cobrador: cl.cobrador || '',
+      resultado,
+      detalle: menuResult ? `IVR opción: ${menuResult}` : (callStatus || 'Sin respuesta'),
+      campaignId,
+      timestamp: new Date().toISOString()
     });
-    const url = new URL(GAS_WEBHOOK_URL);
-    const req = https.request({
-      hostname: url.hostname, path: url.pathname + url.search,
-      method: 'POST', headers: { 'Content-Type': 'application/json' }
-    });
-    req.on('error', e => console.error('GAS error:', e.message));
-    req.write(payload); req.end();
+
+    try {
+      const url = new URL(GAS_WEBHOOK_URL);
+      const gasReq = https.request({
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        }
+      });
+      gasReq.on('error', e => console.error('   ❌ GAS error:', e.message));
+      gasReq.write(payload);
+      gasReq.end();
+      console.log(`   📤 Enviado a GAS`);
+    } catch (e) {
+      console.error('   ❌ GAS exception:', e.message);
+    }
   }
 }
 
 // ============================================================
 // API ENDPOINTS
 // ============================================================
+
+// --- INICIAR CAMPAÑA ---
 app.post('/api/campaign', auth, async (req, res) => {
   try {
-    const { clients, delaySeconds = 25 } = req.body;
+    const { clients, delaySeconds = 30 } = req.body;
     if (!clients?.length) return res.status(400).json({ error: 'No hay clientes' });
 
     const campaignId = crypto.randomUUID().slice(0, 8);
-    const cls = clients.map(c => ({ ...c, resultado: 'pendiente', logged: false }));
+    const cls = clients.map(c => ({
+      ...c,
+      resultado: 'pendiente',
+      logged: false,
+      dtmf: null
+    }));
+
     campaigns.set(campaignId, {
-      clients: cls, started: new Date().toISOString(),
-      completed: 0, total: cls.length, cancelled: false
+      clients: cls,
+      started: new Date().toISOString(),
+      completed: 0,
+      total: cls.length,
+      cancelled: false,
+      delaySeconds
     });
 
+    console.log(`\n🚀 Campaña ${campaignId} iniciada: ${cls.length} clientes, delay=${delaySeconds}s`);
     res.json({ campaignId, total: cls.length, status: 'iniciada' });
 
+    // Ejecutar llamadas secuencialmente
     for (let i = 0; i < cls.length; i++) {
       const camp = campaigns.get(campaignId);
-      if (!camp || camp.cancelled) break;
+      if (!camp || camp.cancelled) {
+        console.log(`⛔ Campaña ${campaignId} cancelada en llamada #${i}`);
+        break;
+      }
+
       try {
         await makeCall(cls[i].telefono, campaignId, i, cls[i]);
       } catch (err) {
         console.error(`❌ Error llamada ${i}:`, err.message);
-        logResult(campaignId, i, null, 'error');
+        logResult(campaignId, i, null, 'error', cls[i]);
       }
-      if (i < cls.length - 1) await new Promise(r => setTimeout(r, delaySeconds * 1000));
+
+      // Esperar entre llamadas (dar tiempo al IVR de completar)
+      if (i < cls.length - 1) {
+        await new Promise(r => setTimeout(r, delaySeconds * 1000));
+      }
     }
-    console.log(`✅ Campaña ${campaignId} completada`);
+
+    const camp = campaigns.get(campaignId);
+    console.log(`\n✅ Campaña ${campaignId} completada: ${camp?.completed || 0}/${cls.length}`);
   } catch (err) {
     console.error('Campaign error:', err);
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
 
+// --- STATUS CAMPAÑA ---
 app.get('/api/campaign/:id', auth, (req, res) => {
   const camp = campaigns.get(req.params.id);
   if (!camp) return res.status(404).json({ error: 'No encontrada' });
   res.json({
-    campaignId: req.params.id, total: camp.total,
-    completed: camp.completed || 0, cancelled: !!camp.cancelled,
+    campaignId: req.params.id,
+    total: camp.total,
+    completed: camp.completed || 0,
+    cancelled: !!camp.cancelled,
+    started: camp.started,
     clients: camp.clients.map(c => ({
-      nombre: c.nombre, telefono: c.telefono,
-      saldo: c.saldo || '', resultado: c.resultado || 'pendiente'
+      nombre: c.nombre,
+      telefono: c.telefono,
+      saldo: c.saldo || '',
+      resultado: c.resultado || 'pendiente',
+      dtmf: c.dtmf || null
     }))
   });
 });
 
+// --- CANCELAR CAMPAÑA ---
 app.post('/api/campaign/:id/cancel', auth, (req, res) => {
   const camp = campaigns.get(req.params.id);
   if (!camp) return res.status(404).json({ error: 'No encontrada' });
   camp.cancelled = true;
+  console.log(`⛔ Campaña ${req.params.id} cancelada manualmente`);
   res.json({ status: 'cancelada' });
 });
 
+// --- LLAMADA DE PRUEBA ---
 app.post('/api/test-call', auth, async (req, res) => {
   try {
-    const { phone, nombre = 'Prueba' } = req.body;
-    const result = await makeCall(phone, 'test', 0, { nombre, telefono: phone });
-    res.json({ success: result.status === 'success', result });
+    const { phone, nombre = 'Cliente Prueba', saldo = '1000' } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Falta phone' });
+
+    console.log(`\n🧪 Llamada de prueba a ${nombre} (${phone})`);
+    const result = await makeCall(phone, 'test', 0, {
+      nombre, telefono: phone, saldo,
+      diasAtraso: '30', promotor: 'Test', cobrador: 'Test'
+    });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
+// --- BALANCE ---
 app.get('/api/balance', auth, async (req, res) => {
-  try { res.json(await zadarmaRequest('/v1/info/balance/')); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  try {
+    const result = await zadarmaRequest('/v1/info/balance/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
+// --- LISTAR ARCHIVOS IVR ---
+app.get('/api/ivr-files', auth, async (req, res) => {
+  try {
+    const result = await zadarmaRequest('/v1/pbx/ivr/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- LISTAR EXTENSIONES ---
+app.get('/api/extensions', auth, async (req, res) => {
+  try {
+    const result = await zadarmaRequest('/v1/pbx/internal/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- LISTAR ESCENARIOS IVR ---
+app.get('/api/scenarios', auth, async (req, res) => {
+  try {
+    const result = await zadarmaRequest('/v1/pbx/ivr/scenario/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- CONFIG ---
 app.get('/api/config', auth, (req, res) => {
   res.json({
+    version: '6.0',
     provider: 'zadarma',
-    zadarma: { configured: !!(ZADARMA_API_KEY && ZADARMA_API_SECRET), sip: ZADARMA_SIP, callerId: ZADARMA_CALLER_ID },
+    zadarma: {
+      configured: !!(ZADARMA_API_KEY && ZADARMA_API_SECRET),
+      sip: ZADARMA_SIP,
+      callerId: ZADARMA_CALLER_ID,
+      scenario: ZADARMA_SCENARIO,
+      ivrFileId: IVR_FILE_ID || 'NO CONFIGURADO (usando TTS)'
+    },
     gas: { configured: !!GAS_WEBHOOK_URL },
-    whatsapp: WHATSAPP_NUMBER, serverUrl: SERVER_URL,
-    activeCalls: activeCalls.size, activeCampaigns: campaigns.size
+    whatsapp: WHATSAPP_NUMBER,
+    serverUrl: SERVER_URL,
+    webhookUrl: `${SERVER_URL}/zadarma`,
+    activeCalls: activeCalls.size,
+    phoneIndex: phoneToCall.size,
+    activeCampaigns: campaigns.size
   });
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', provider: 'zadarma', uptime: Math.floor(process.uptime()) }));
-app.get('/', (req, res) => res.json({ service: 'LeGaXi IVR v5.0 - Zadarma', status: 'running' }));
+// --- HEALTH ---
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    version: '6.0',
+    provider: 'zadarma',
+    uptime: Math.floor(process.uptime()),
+    activeCalls: activeCalls.size,
+    campaigns: campaigns.size
+  });
+});
 
+// --- ROOT ---
+app.get('/', (req, res) => {
+  res.json({
+    service: 'LeGaXi IVR v6.0 - Zadarma Webhook IVR',
+    status: 'running',
+    endpoints: {
+      webhook: '/zadarma',
+      panel: '/panel',
+      testCall: 'POST /api/test-call',
+      campaign: 'POST /api/campaign',
+      balance: 'GET /api/balance',
+      config: 'GET /api/config',
+      ivrFiles: 'GET /api/ivr-files',
+      scenarios: 'GET /api/scenarios',
+      extensions: 'GET /api/extensions'
+    }
+  });
+});
+
+// --- PANEL HTML ---
 const panelPath = path.join(__dirname, 'panel.html');
-if (fs.existsSync(panelPath)) app.get('/panel', (req, res) => res.sendFile(panelPath));
+if (fs.existsSync(panelPath)) {
+  app.get('/panel', (req, res) => res.sendFile(panelPath));
+}
 
+// ============================================================
+// LIMPIEZA PERIÓDICA
+// ============================================================
+setInterval(() => {
+  const now = Date.now();
+  const timeout = 5 * 60 * 1000; // 5 minutos
+
+  for (const [key, call] of phoneToCall) {
+    if (now - call.startTime > timeout) {
+      if (!call.logged) {
+        logResult(call.campaignId, call.index, 'timeout', 'sin_respuesta', call);
+      }
+      phoneToCall.delete(key);
+    }
+  }
+
+  for (const [key, call] of activeCalls) {
+    if (now - call.startTime > timeout) {
+      activeCalls.delete(key);
+    }
+  }
+
+  // Limpiar campañas viejas (>1 hora)
+  for (const [key, camp] of campaigns) {
+    if (now - new Date(camp.started).getTime() > 3600000) {
+      campaigns.delete(key);
+    }
+  }
+}, 60000);
+
+// ============================================================
+// START
+// ============================================================
 app.listen(PORT, () => {
-  console.log('╔═══════════════════════════════════════════════╗');
-  console.log('║   🚀 LeGaXi IVR v5.0 - ZADARMA              ║');
-  console.log('╠═══════════════════════════════════════════════╣');
-  console.log(`║ Puerto: ${PORT}`);
-  console.log(`║ SIP: ${ZADARMA_SIP} | CallerID: ${ZADARMA_CALLER_ID}`);
-  console.log(`║ WhatsApp: ${WHATSAPP_NUMBER}`);
-  console.log(`║ Webhook: ${SERVER_URL}/zadarma`);
-  console.log(`║ GAS: ${GAS_WEBHOOK_URL ? '✅' : '❌'}`);
-  console.log('╚═══════════════════════════════════════════════╝');
+  console.log('╔══════════════════════════════════════════════════════╗');
+  console.log('║   🚀 LeGaXi IVR v6.0 - ZADARMA WEBHOOK IVR        ║');
+  console.log('╠══════════════════════════════════════════════════════╣');
+  console.log(`║ Puerto:     ${PORT}`);
+  console.log(`║ Extensión:  ${ZADARMA_SIP}`);
+  console.log(`║ CallerID:   ${ZADARMA_CALLER_ID}`);
+  console.log(`║ Escenario:  ${ZADARMA_SCENARIO}`);
+  console.log(`║ IVR File:   ${IVR_FILE_ID || 'TTS dinámico'}`);
+  console.log(`║ Webhook:    ${SERVER_URL}/zadarma`);
+  console.log(`║ GAS:        ${GAS_WEBHOOK_URL ? '✅ Configurado' : '❌ No configurado'}`);
+  console.log(`║ API Key:    ${API_KEY ? '✅ Protegido' : '⚠️ Sin protección'}`);
+  console.log('╚══════════════════════════════════════════════════════╝');
 });
