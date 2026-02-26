@@ -746,6 +746,26 @@ app.get('/api/debug-call', auth, async (req, res) => {
   }
 });
 
+// --- IVR SOUNDS ---
+app.get('/api/ivr-sounds', auth, async (req, res) => {
+  try {
+    const result = await zadarmaRequest('/v1/pbx/ivr/sounds/list/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- IVR LIST ---
+app.get('/api/ivr-list', auth, async (req, res) => {
+  try {
+    const result = await zadarmaRequest('/v1/pbx/ivr/');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- HEALTH ---
 app.get('/health', (req, res) => {
   res.json({
