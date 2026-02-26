@@ -123,14 +123,14 @@ async function makeCall(phone, campaignId, index, clientData) {
   if (cleanPhone.length > 10) cleanPhone = cleanPhone.slice(-10);
 
   const params = {
-    from: ZADARMA_SCENARIO,   // Escenario PBX con IVR (formato 0-1)
+    from: ZADARMA_SCENARIO,   // Menú IVR 0 con audio grabado
     to: cleanPhone,
-    sip: ZADARMA_SIP
-    // SIN predicted: la llamada pasa por el menú IVR
+    sip: ZADARMA_SIP,
+    predicted: 'predicted'    // Llama primero al deudor, luego lo conecta al IVR
   };
 
   console.log(`📞 [${campaignId}] #${index} Llamando ${clientData.nombre} → ${cleanPhone}`);
-  console.log(`   📋 Params: from=${params.from} to=${params.to} sip=${params.sip}`);
+  console.log(`   📋 Params: from=${params.from} to=${params.to} sip=${params.sip} predicted`);
 
   try {
     const result = await zadarmaRequest('/v1/request/callback/', params);
