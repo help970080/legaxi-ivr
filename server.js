@@ -45,42 +45,58 @@ function auth(req, res, next) {
 }
 
 // ---- ZADARMA API (implementación nativa, sin dependencias) ----
+// Algoritmo de firma según documentación oficial:
+// 1. Ordenar params por key alfabéticamente
+// 2. Generar query string: "key1=val1&key2=val2"
+// 3. signStr = methodPath + paramsStr + md5(paramsStr)
+// 4. signature = base64(hmac_sha1(signStr, secret))
+// 5. Header: Authorization: userKey:signature
+
 function zadarmaRequest(method, params = {}) {
   return new Promise((resolve, reject) => {
-    // Ordenar parámetros alfabéticamente
+    // 1. Ordenar parámetros alfabéticamente (ksort en PHP)
     const sortedKeys = Object.keys(params).sort();
-    const sortedParams = {};
-    sortedKeys.forEach(k => { sortedParams[k] = params[k]; });
+    const pairs = [];
+    sortedKeys.forEach(k => {
+      pairs.push(`${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`);
+    });
+    const paramsStr = pairs.join('&');
 
-    const queryString = new URLSearchParams(sortedParams).toString();
-    const path = method;
+    // 2. Crear string para firmar: method + paramsStr + md5(paramsStr)
+    const md5hash = crypto.createHash('md5').update(paramsStr).digest('hex');
+    const signStr = method + paramsStr + md5hash;
 
-    // Generar firma según documentación Zadarma
-    const signStr = path + queryString + crypto.createHash('md5').update(queryString).digest('hex');
-    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET).update(signStr).digest('base64');
+    // 3. HMAC-SHA1 con secret key, luego base64
+    const signature = crypto.createHmac('sha1', ZADARMA_API_SECRET)
+      .update(signStr)
+      .digest('base64');
+
+    // 4. Determinar método HTTP
+    const httpMethod = sortedKeys.length > 0 ? 'POST' : 'GET';
 
     const options = {
       hostname: 'api.zadarma.com',
-      path: queryString ? `${path}?${queryString}` : path,
-      method: Object.keys(params).length > 0 ? 'POST' : 'GET',
+      path: method,
+      method: httpMethod,
       headers: {
-        'Authorization': `${ZADARMA_API_KEY}:${signature}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Authorization': `${ZADARMA_API_KEY}:${signature}`
       }
     };
 
-    // Para POST, enviar params en el body
-    if (Object.keys(params).length > 0) {
-      options.path = path;
-      options.headers['Content-Length'] = Buffer.byteLength(queryString);
+    if (httpMethod === 'POST') {
+      options.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      options.headers['Content-Length'] = Buffer.byteLength(paramsStr);
     }
+
+    console.log(`   🔑 API ${httpMethod} ${method} params=${paramsStr.substring(0, 100)}`);
 
     const req = https.request(options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
-          resolve(JSON.parse(data));
+          const parsed = JSON.parse(data);
+          resolve(parsed);
         } catch (e) {
           resolve({ status: 'error', raw: data });
         }
@@ -88,8 +104,9 @@ function zadarmaRequest(method, params = {}) {
     });
 
     req.on('error', reject);
-    if (Object.keys(params).length > 0) {
-      req.write(queryString);
+
+    if (httpMethod === 'POST') {
+      req.write(paramsStr);
     }
     req.end();
   });
